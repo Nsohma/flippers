@@ -1,0 +1,49 @@
+erDiagram
+    ItemMaster ||--o{ ItemCategoryMaster : "ItemCode"
+    CategoryMaster ||--o{ ItemCategoryMaster : "CategoryCode"
+    
+    ItemMaster ||--o{ POSItemMaster : "ItemCode"
+    MDHierarchyMaster ||--o{ POSItemMaster : "MDHierarchyCode"
+    MDHierarchyMaster ||--o{ MDHierarchyMaster : "ParentCode"
+
+    ItemMaster ||--o{ ToppingItemMaster : "ItemCode"
+    ToppingMaster ||--o{ ToppingItemMaster : "ToppingCode"
+    
+    ItemMaster ||--o{ ItemRelationToppingMaster : "ItemCode"
+    ToppingMaster ||--o{ ItemRelationToppingMaster : "ToppingCode"
+
+    PresetMenuMaster ||--o{ PresetMenuButtonMaster : "PageNumber"
+    ItemMaster ||--o{ PresetMenuButtonMaster : "SettingData = ItemCode"
+
+    ItemMaster {
+        int ItemCode PK
+        string ItemName
+        int UnitPrice
+    }
+    CategoryMaster {
+        int CategoryCode PK
+        string CategoryName
+    }
+    MDHierarchyMaster {
+        int MDHierarchyCode PK
+        string Description
+        int ParentCode FK
+    }
+    ToppingMaster {
+        int ToppingCode PK
+        string ToppingName
+    }
+    PresetMenuMaster {
+        int PageNumber PK
+        string Description
+    }
+    PresetMenuButtonMaster {
+        int PageNumber FK
+        int ButtonColumnNumber
+        int ButtonRowNumber
+        int SettingData FK "ItemCode"
+    }
+    TableMaster {
+        int TableNumber PK
+        string TableName
+    }
