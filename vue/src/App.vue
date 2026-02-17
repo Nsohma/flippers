@@ -86,9 +86,66 @@ async function loadPage(pageNumber) {
   }
 }
 
+async function exportExcel() {
+  if (!state.draftId) {
+    state.error = "draftIdがありません";
+    return;
+  }
+
+  state.error = "";
+  state.loading = true;
+  try {
+    const res = await fetch(`${API_BASE}/drafts/${state.draftId}/export`);
+    if (!res.ok) {
+      let message = `Export failed: ${res.status}`;
+      try {
+        const body = await res.json();
+        if (body?.message) message = body.message;
+      } catch {
+        // ignore json parse error and use default message
+      }
+      throw new Error(message);
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${state.draftId}_edited.xlsx`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    state.error = String(e);
+  } finally {
+    state.loading = false;
+  }
+}
+
 // styleKeyは今は “表示だけ” にして、まず動かす（後で色マップにする）
 function buttonClass(styleKey) {
   return `btn style-${styleKey}`;
+}
+
+function formatPrice(unitPrice) {
+  const raw = String(unitPrice ?? "").trim();
+  if (!raw) return "";
+
+  const normalized = raw.replace(/,/g, "");
+  if (!/^-?\d+(\.\d+)?$/.test(normalized)) {
+    return raw;
+  }
+
+  const number = Number(normalized);
+  if (!Number.isFinite(number)) {
+    return raw;
+  }
+
+  if (Number.isInteger(number)) {
+    return `¥${number.toLocaleString("ja-JP")}`;
+  }
+  return `¥${number.toLocaleString("ja-JP", { maximumFractionDigits: 2 })}`;
 }
 
 function resetDragState() {
@@ -107,6 +164,7 @@ function onButtonDragStart(cell, event) {
 }
 
 function onCellDragOver(cell, event) {
+  if (state.loading) return;
   if (!dragState.sourceKey) return;
   if (!cell?.button) return;
   if (cell.key === dragState.sourceKey) return;
@@ -121,30 +179,64 @@ function onCellDragLeave(cell) {
   }
 }
 
-function onCellDrop(cell, event) {
-  if (!dragState.sourceKey) return;
+async function onCellDrop(cell, event) {
+  if (state.loading) return;
+  const sourceKey = event.dataTransfer?.getData("text/plain") || dragState.sourceKey;
+  if (!sourceKey) return;
   event.preventDefault();
 
-  if (!cell?.button || cell.key === dragState.sourceKey) {
+  if (!state.draftId || !state.page) {
     resetDragState();
     return;
   }
 
-  const sourceButton = buttonMap.value.get(dragState.sourceKey);
+  if (!cell?.button || cell.key === sourceKey) {
+    resetDragState();
+    return;
+  }
+
+  const sourceButton = buttonMap.value.get(sourceKey);
   const targetButton = buttonMap.value.get(cell.key);
   if (!sourceButton || !targetButton) {
     resetDragState();
     return;
   }
 
-  const sourceCol = sourceButton.col;
-  const sourceRow = sourceButton.row;
-  sourceButton.col = targetButton.col;
-  sourceButton.row = targetButton.row;
-  targetButton.col = sourceCol;
-  targetButton.row = sourceRow;
+  state.error = "";
+  state.loading = true;
+  try {
+    const res = await fetch(
+      `${API_BASE}/drafts/${state.draftId}/pages/${state.page.pageNumber}/buttons/swap`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fromCol: sourceButton.col,
+          fromRow: sourceButton.row,
+          toCol: targetButton.col,
+          toRow: targetButton.row,
+        }),
+      },
+    );
+    if (!res.ok) {
+      let message = `Swap failed: ${res.status}`;
+      try {
+        const body = await res.json();
+        if (body?.message) message = body.message;
+      } catch {
+        // ignore json parse error and use default message
+      }
+      throw new Error(message);
+    }
 
-  resetDragState();
+    const page = await res.json();
+    state.page = page;
+  } catch (e) {
+    state.error = String(e);
+  } finally {
+    state.loading = false;
+    resetDragState();
+  }
 }
 
 function onButtonDragEnd() {
@@ -159,6 +251,7 @@ function onButtonDragEnd() {
     <section class="panel">
       <input ref="fileRef" type="file" accept=".xlsx" />
       <button @click="importExcel" :disabled="state.loading">Import</button>
+      <button @click="exportExcel" :disabled="state.loading || !state.draftId">Export</button>
 
       <div class="meta" v-if="state.draftId">
         <div><b>draftId</b>: {{ state.draftId }}</div>
@@ -215,7 +308,12 @@ function onButtonDragEnd() {
             @dragend="onButtonDragEnd"
           >
             <div class="label">{{ cell.button.label }}</div>
-            <div class="sub">#{{ cell.button.itemCode }}</div>
+            <div class="sub">
+              <span class="item-code">#{{ cell.button.itemCode }}</span>
+              <span v-if="cell.button.unitPrice" class="unit-price">
+                {{ formatPrice(cell.button.unitPrice) }}
+              </span>
+            </div>
           </button>
           <div v-else class="empty"></div>
         </div>
@@ -237,7 +335,9 @@ function onButtonDragEnd() {
 .drag-source { outline: 2px solid #6c8cff; outline-offset: 1px; }
 .drag-over { background: #eef3ff; border-color: #9cb1ff; }
 .label { font-weight: 700; line-height: 1.2; }
-.sub { opacity: .7; font-size: 12px; margin-top: 4px; }
+.sub { opacity: .7; font-size: 12px; margin-top: 4px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.item-code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.unit-price { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* いったんstyleKeyは軽い差だけ（あとであなたの色仕様に合わせて本実装） */
 .style-1 { border-color: #bbb; }

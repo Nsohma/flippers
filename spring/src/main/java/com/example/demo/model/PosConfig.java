@@ -1,5 +1,6 @@
 package com.example.demo.model;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -8,7 +9,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-public class PosConfig {
+public class PosConfig implements Serializable {
+    private static final long serialVersionUID = 1L;
+
     private final List<Category> categories;               // 上段
     private final Map<Integer, Page> pagesByPageNumber;    // 下段（pageNumberごと）
 
@@ -26,6 +29,18 @@ public class PosConfig {
 
     public Page getPage(int pageNumber) {
         return pagesByPageNumber.get(pageNumber);
+    }
+
+    public PosConfig swapButtons(int pageNumber, int fromCol, int fromRow, int toCol, int toRow) {
+        Page page = pagesByPageNumber.get(pageNumber);
+        if (page == null) {
+            throw new IllegalArgumentException("page not found: " + pageNumber);
+        }
+
+        Page swappedPage = page.swapButtons(fromCol, fromRow, toCol, toRow);
+        Map<Integer, Page> updatedPages = new LinkedHashMap<>(pagesByPageNumber);
+        updatedPages.put(pageNumber, swappedPage);
+        return new PosConfig(categories, Collections.unmodifiableMap(updatedPages));
     }
 
     public static PosConfig fromSource(PosConfigSource source) {
@@ -59,7 +74,9 @@ public class PosConfig {
     }
 
     // ---- Value-like domain classes ----
-    public static class Category {
+    public static class Category implements Serializable {
+        private static final long serialVersionUID = 1L;
+
         private final int pageNumber;
         private final int cols;
         private final int rows;
@@ -81,7 +98,9 @@ public class PosConfig {
         public int getStyleKey() { return styleKey; }
     }
 
-    public static class Page {
+    public static class Page implements Serializable {
+        private static final long serialVersionUID = 1L;
+
         private final int pageNumber;
         private final int cols;
         private final int rows;
@@ -98,21 +117,58 @@ public class PosConfig {
         public int getCols() { return cols; }
         public int getRows() { return rows; }
         public List<Button> getButtons() { return buttons; }
+
+        public Page swapButtons(int fromCol, int fromRow, int toCol, int toRow) {
+            if (fromCol == toCol && fromRow == toRow) {
+                return this;
+            }
+
+            int fromIndex = -1;
+            int toIndex = -1;
+            for (int i = 0; i < buttons.size(); i++) {
+                Button button = buttons.get(i);
+                if (button.getCol() == fromCol && button.getRow() == fromRow) {
+                    fromIndex = i;
+                } else if (button.getCol() == toCol && button.getRow() == toRow) {
+                    toIndex = i;
+                }
+            }
+
+            if (fromIndex < 0) {
+                throw new IllegalArgumentException("source button not found: (" + fromCol + "," + fromRow + ")");
+            }
+            if (toIndex < 0) {
+                throw new IllegalArgumentException("target button not found: (" + toCol + "," + toRow + ")");
+            }
+
+            List<Button> swappedButtons = new ArrayList<>(buttons);
+            Button fromButton = swappedButtons.get(fromIndex);
+            Button toButton = swappedButtons.get(toIndex);
+            swappedButtons.set(fromIndex, toButton.withPosition(fromCol, fromRow));
+            swappedButtons.set(toIndex, fromButton.withPosition(toCol, toRow));
+            return new Page(pageNumber, cols, rows, List.copyOf(swappedButtons));
+        }
     }
 
-    public static class Button {
+    public static class Button implements Serializable {
+        private static final long serialVersionUID = 1L;
+
         private final int col;
         private final int row;
         private final String label;
         private final int styleKey;
         private final String itemCode; // SettingData
+        private final String unitPrice;
+        private final String buttonId;
 
-        public Button(int col, int row, String label, int styleKey, String itemCode) {
+        public Button(int col, int row, String label, int styleKey, String itemCode, String unitPrice, String buttonId) {
             this.col = col;
             this.row = row;
             this.label = label;
             this.styleKey = styleKey;
             this.itemCode = itemCode;
+            this.unitPrice = unitPrice;
+            this.buttonId = buttonId;
         }
 
         public int getCol() { return col; }
@@ -120,5 +176,11 @@ public class PosConfig {
         public String getLabel() { return label; }
         public int getStyleKey() { return styleKey; }
         public String getItemCode() { return itemCode; }
+        public String getUnitPrice() { return unitPrice; }
+        public String getButtonId() { return buttonId; }
+
+        public Button withPosition(int newCol, int newRow) {
+            return new Button(newCol, newRow, label, styleKey, itemCode, unitPrice, buttonId);
+        }
     }
 }

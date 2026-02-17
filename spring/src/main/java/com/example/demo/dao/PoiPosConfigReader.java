@@ -15,17 +15,20 @@ public class PoiPosConfigReader implements PosConfigReader {
 
     private static final String SHEET_MENU = "PresetMenuMaster";
     private static final String SHEET_BUTTON = "PresetMenuButtonMaster";
+    private static final String SHEET_ITEM = "ItemMaster";
 
     @Override
     public PosConfigSource read(InputStream in) throws Exception {
         try (Workbook wb = new XSSFWorkbook(in)) {
             Sheet menu = requireSheet(wb, SHEET_MENU);
             Sheet btn  = requireSheet(wb, SHEET_BUTTON);
+            Sheet item = requireSheet(wb, SHEET_ITEM);
 
             ExcelUtil u = new ExcelUtil(wb);
 
-            HeaderMap menuHm = HeaderMap.from(menu, u);
-            HeaderMap btnHm  = HeaderMap.from(btn, u);
+            HeaderMap menuHm = HeaderMap.from(menu, u, "PageNumber");
+            HeaderMap btnHm  = HeaderMap.from(btn, u, "PageNumber");
+            HeaderMap itemHm = HeaderMap.from(item, u, "ItemCode", "UnitPrice");
 
             // PresetMenuMaster: PageNumber, ButtonColumnCount, ButtonRowCount, Description, StyleKey
             int mPage = menuHm.require("PageNumber");
@@ -59,6 +62,21 @@ public class PoiPosConfigReader implements PosConfigReader {
             int bStyle= btnHm.require("StyleKey");
             int bSet  = btnHm.require("SettingData");
 
+            int iCode = itemHm.require("ItemCode");
+            int iUnitPrice = itemHm.require("UnitPrice");
+
+            Map<String, String> unitPriceByItemCode = new HashMap<>();
+            for (int r = itemHm.dataStartRow; r <= item.getLastRowNum(); r++) {
+                Row row = item.getRow(r);
+                if (row == null) continue;
+
+                String itemCode = nonNull(u.str(row.getCell(iCode)));
+                if (isBlank(itemCode)) continue;
+
+                String unitPrice = nonNull(u.str(row.getCell(iUnitPrice)));
+                unitPriceByItemCode.put(itemCode, unitPrice);
+            }
+
             List<PosConfigSource.PageButton> pageButtons = new ArrayList<>();
             for (int r = btnHm.dataStartRow; r <= btn.getLastRowNum(); r++) {
                 Row row = btn.getRow(r);
@@ -73,11 +91,13 @@ public class PoiPosConfigReader implements PosConfigReader {
                 String desc = nonNull(u.str(row.getCell(bDesc)));
                 int style = parseIntStrict(u.str(row.getCell(bStyle)), "PresetMenuButtonMaster.StyleKey");
                 String itemCode = nonNull(u.str(row.getCell(bSet))); // SettingData
+                String unitPrice = unitPriceByItemCode.getOrDefault(itemCode, "");
+                String buttonId = buttonRowId(r);
 
                 pageButtons.add(
                         new PosConfigSource.PageButton(
                                 page,
-                                new PosConfig.Button(col, rowNo, desc, style, itemCode)
+                                new PosConfig.Button(col, rowNo, desc, style, itemCode, unitPrice, buttonId)
                         )
                 );
             }
@@ -95,6 +115,9 @@ public class PoiPosConfigReader implements PosConfigReader {
     // ---- helpers ----
     private static boolean isBlank(String s) { return s == null || s.trim().isEmpty(); }
     private static String nonNull(String s) { return s == null ? "" : s; }
+    private static String buttonRowId(int zeroBasedRowIndex) {
+        return SHEET_BUTTON + "#R" + (zeroBasedRowIndex + 1);
+    }
 
     private static int parseIntStrict(String s, String field) {
         if (s == null) throw new IllegalArgumentException("Missing value: " + field);
@@ -133,8 +156,8 @@ public class PoiPosConfigReader implements PosConfigReader {
             return idx;
         }
 
-        static HeaderMap from(Sheet sheet, ExcelUtil u) {
-            int headerRow = findHeaderRow(sheet, u);
+        static HeaderMap from(Sheet sheet, ExcelUtil u, String... requiredHeaderCandidates) {
+            int headerRow = findHeaderRow(sheet, u, requiredHeaderCandidates);
             Row hr = sheet.getRow(headerRow);
             if (hr == null) throw new IllegalArgumentException("Header row not found: " + sheet.getSheetName());
 
@@ -148,7 +171,7 @@ public class PoiPosConfigReader implements PosConfigReader {
             return new HeaderMap(map, headerRow + 1);
         }
 
-        static int findHeaderRow(Sheet sheet, ExcelUtil u) {
+        static int findHeaderRow(Sheet sheet, ExcelUtil u, String... headerCandidates) {
             int max = Math.min(sheet.getLastRowNum(), 20);
             for (int r = 0; r <= max; r++) {
                 Row row = sheet.getRow(r);
@@ -157,7 +180,11 @@ public class PoiPosConfigReader implements PosConfigReader {
                     String v = u.str(row.getCell(c));
                     if (v == null) continue;
                     String t = v.trim();
-                    if (t.equals("PageNumber")) return r;
+                    if (headerCandidates != null) {
+                        for (String candidate : headerCandidates) {
+                            if (candidate != null && !candidate.isBlank() && t.equals(candidate)) return r;
+                        }
+                    }
                 }
             }
             return 0;

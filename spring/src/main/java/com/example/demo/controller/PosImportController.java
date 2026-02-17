@@ -77,6 +77,8 @@ public class PosImportController {
             bd.label = b.getLabel();
             bd.styleKey = b.getStyleKey();
             bd.itemCode = b.getItemCode();
+            bd.unitPrice = b.getUnitPrice();
+            bd.buttonId = b.getButtonId();
             return bd;
         }).collect(Collectors.toList());
         return dto;

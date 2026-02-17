@@ -24,4 +24,26 @@ public class GetPageService implements GetPageUseCase {
         if (page == null) throw new NotFoundException("page not found: " + pageNumber);
         return page;
     }
+
+    @Override
+    public PosConfig.Page swapButtons(
+            String draftId,
+            int pageNumber,
+            int fromCol,
+            int fromRow,
+            int toCol,
+            int toRow
+    ) {
+        PosDraft draft = draftRepository
+                .findById(draftId)
+                .orElseThrow(() -> new NotFoundException("draft not found: " + draftId));
+
+        PosConfig.Page currentPage = draft.getConfig().getPage(pageNumber);
+        if (currentPage == null) throw new NotFoundException("page not found: " + pageNumber);
+
+        PosConfig updatedConfig = draft.getConfig().swapButtons(pageNumber, fromCol, fromRow, toCol, toRow);
+        PosDraft updatedDraft = new PosDraft(draftId, updatedConfig, draft.getOriginalExcelBytes());
+        draftRepository.save(updatedDraft);
+        return updatedConfig.getPage(pageNumber);
+    }
 }

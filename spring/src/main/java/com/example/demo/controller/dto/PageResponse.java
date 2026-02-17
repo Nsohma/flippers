@@ -14,5 +14,7 @@ public class PageResponse {
         public String label;
         public int styleKey;
         public String itemCode;
+        public String unitPrice;
+        public String buttonId;
     }
 }

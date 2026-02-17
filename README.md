@@ -22,6 +22,7 @@
 5. ユーザはエクスポートされたエクセルファイルをusbを用いてレジのPOSシステムにアップロードする
 
 ## システム構成
-バック : Java Spring
+バック : Java Spring Frame Work
+
 フロント : Vue.js
 

@@ -25,15 +25,16 @@ public class ImportPosService implements ImportPosUseCase {
 
     @Override
     public PosDraft importExcel(ImportPosCommand command) {
-        PosConfig config = readConfig(command);
+        byte[] excelBytes = command.excelBytes();
+        PosConfig config = readConfig(excelBytes);
         String draftId = "dft_" + UUID.randomUUID();
-        PosDraft draft = new PosDraft(draftId, config);
+        PosDraft draft = new PosDraft(draftId, config, excelBytes);
         draftRepository.save(draft);
         return draft;
     }
 
-    private PosConfig readConfig(ImportPosCommand command) {
-        try (ByteArrayInputStream in = new ByteArrayInputStream(command.excelBytes())) {
+    private PosConfig readConfig(byte[] excelBytes) {
+        try (ByteArrayInputStream in = new ByteArrayInputStream(excelBytes)) {
             PosConfigSource source = reader.read(in);
             return PosConfig.fromSource(source);
         } catch (IllegalArgumentException ex) {
