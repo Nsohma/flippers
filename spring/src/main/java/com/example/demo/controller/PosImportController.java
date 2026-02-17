@@ -43,6 +43,8 @@ public class PosImportController {
 
         ImportResponse res = new ImportResponse();
         res.draftId = draft.getDraftId();
+        res.canUndo = draft.canUndo();
+        res.canRedo = draft.canRedo();
 
         res.categories = config.getCategories().stream().map(c -> {
             ImportResponse.CategoryDto dto = new ImportResponse.CategoryDto();

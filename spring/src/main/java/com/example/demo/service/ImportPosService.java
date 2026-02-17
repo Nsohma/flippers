@@ -1,5 +1,6 @@
 package com.example.demo.service;
 
+import com.example.demo.model.ItemCatalog;
 import com.example.demo.model.PosConfig;
 import com.example.demo.model.PosConfigSource;
 import com.example.demo.model.PosDraft;
@@ -26,21 +27,31 @@ public class ImportPosService implements ImportPosUseCase {
     @Override
     public PosDraft importExcel(ImportPosCommand command) {
         byte[] excelBytes = command.excelBytes();
-        PosConfig config = readConfig(excelBytes);
+        ParsedDraft parsedDraft = parseDraft(excelBytes);
         String draftId = "dft_" + UUID.randomUUID();
-        PosDraft draft = new PosDraft(draftId, config, excelBytes);
+        PosDraft draft = new PosDraft(
+                draftId,
+                parsedDraft.config(),
+                excelBytes,
+                parsedDraft.itemCatalog(),
+                "インポート"
+        );
         draftRepository.save(draft);
         return draft;
     }
 
-    private PosConfig readConfig(byte[] excelBytes) {
+    private ParsedDraft parseDraft(byte[] excelBytes) {
         try (ByteArrayInputStream in = new ByteArrayInputStream(excelBytes)) {
             PosConfigSource source = reader.read(in);
-            return PosConfig.fromSource(source);
+            PosConfig config = PosConfig.fromSource(source);
+            return new ParsedDraft(config, source.getItemCatalog());
         } catch (IllegalArgumentException ex) {
             throw new InvalidPosExcelException(ex.getMessage(), ex);
         } catch (Exception ex) {
             throw new InvalidPosExcelException("failed to parse excel file", ex);
         }
+    }
+
+    private record ParsedDraft(PosConfig config, ItemCatalog itemCatalog) {
     }
 }

@@ -6,17 +6,19 @@ import com.example.demo.service.port.DraftRepository;
 import org.springframework.stereotype.Service;
 
 @Service
-public class GetPageService implements GetPageUseCase {
+public class DeleteCategoryService implements DeleteCategoryUseCase {
 
     private final DraftRepository draftRepository;
 
-    public GetPageService(DraftRepository draftRepository) {
+    public DeleteCategoryService(DraftRepository draftRepository) {
         this.draftRepository = draftRepository;
     }
 
     @Override
-    public PosConfig.Page getPage(String draftId, int pageNumber) {
+    public PosConfig deleteCategory(String draftId, int pageNumber) {
         PosDraft draft = DraftServiceSupport.requireDraft(draftRepository, draftId);
-        return DraftServiceSupport.requirePage(draft, pageNumber);
+        PosConfig updatedConfig = draft.getConfig().deleteCategory(pageNumber);
+        DraftServiceSupport.saveUpdatedDraft(draftRepository, draft, updatedConfig, null, "カテゴリ削除");
+        return updatedConfig;
     }
 }

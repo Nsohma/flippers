@@ -6,6 +6,8 @@ public class ImportResponse {
     public String draftId;
     public List<CategoryDto> categories;
     public PageDto initialPage;
+    public boolean canUndo;
+    public boolean canRedo;
 
     public static class CategoryDto {
         public int pageNumber;

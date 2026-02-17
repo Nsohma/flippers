@@ -184,6 +184,61 @@ public class PosConfig implements Serializable {
         );
     }
 
+    public PosConfig updateCategoryGrid(int pageNumber, int cols, int rows) {
+        if (cols <= 0) {
+            throw new IllegalArgumentException("cols must be positive");
+        }
+        if (rows <= 0) {
+            throw new IllegalArgumentException("rows must be positive");
+        }
+
+        PosConfig.Page page = pagesByPageNumber.get(pageNumber);
+        if (page == null) {
+            throw new IllegalArgumentException("page not found: " + pageNumber);
+        }
+
+        for (Button button : page.getButtons()) {
+            if (button.getCol() > cols || button.getRow() > rows) {
+                throw new IllegalArgumentException(
+                        "button out of range for resized grid: (" + button.getCol() + "," + button.getRow() + ")"
+                );
+            }
+        }
+
+        boolean categoryFound = false;
+        List<Category> updatedCategories = new ArrayList<>(categories.size());
+        for (Category category : categories) {
+            if (category.getPageNumber() == pageNumber) {
+                categoryFound = true;
+                updatedCategories.add(new Category(
+                        category.getPageNumber(),
+                        cols,
+                        rows,
+                        category.getName(),
+                        category.getStyleKey()
+                ));
+            } else {
+                updatedCategories.add(category);
+            }
+        }
+        if (!categoryFound) {
+            throw new IllegalArgumentException("category(page) not found: " + pageNumber);
+        }
+
+        PosConfig.Page updatedPage = new PosConfig.Page(
+                page.getPageNumber(),
+                cols,
+                rows,
+                page.getButtons()
+        );
+        Map<Integer, Page> updatedPages = new LinkedHashMap<>(pagesByPageNumber);
+        updatedPages.put(pageNumber, updatedPage);
+        return new PosConfig(
+                List.copyOf(updatedCategories),
+                Collections.unmodifiableMap(updatedPages)
+        );
+    }
+
     private boolean hasButtonId(String buttonId) {
         for (Page page : pagesByPageNumber.values()) {
             for (Button button : page.getButtons()) {

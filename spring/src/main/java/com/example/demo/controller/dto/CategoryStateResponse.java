@@ -5,6 +5,8 @@ import java.util.List;
 public class CategoryStateResponse {
     public List<CategoryDto> categories;
     public PageResponse page;
+    public Boolean canUndo;
+    public Boolean canRedo;
 
     public static class CategoryDto {
         public int pageNumber;

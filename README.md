@@ -31,13 +31,20 @@
 
 1. Excelアップロード (`/api/pos/import`)
 2. POS画面再現（上段カテゴリ + 下段グリッド）
-3. ボタン同士の入れ替え（ドラッグ&ドロップ）
-4. 空セルへのボタン追加（カテゴリ絞り込み -> 商品選択）
+3. ボタン同士の入れ替え（ドラッグ&ドロップ、空セルとの入れ替え含む）
+4. 空セルへのボタン追加（`MDHierarchyMaster` + `POSItemMaster` 由来カタログから選択）
 5. ボタン削除
 6. ボタン価格変更（`ItemMaster.UnitPrice` 反映）
 7. 上段カテゴリの追加・削除
-8. Excelエクスポート (`/api/pos/drafts/{draftId}/export`)
-9. エクスポート時は `PresetMenuMaster` と `PresetMenuButtonMaster` を再構築し、`ItemMaster.UnitPrice` を更新
+8. 下段グリッドサイズ変更（列数・行数、`Page(col x row)` の右側ボタンから実行）
+9. Undo / Redo
+10. 編集履歴表示（デフォルト折りたたみ、矢印で展開）
+11. 編集履歴のクリックジャンプ（任意時点へ復元）
+12. 履歴表示の詳細化（ボタン追加/削除に `(カテゴリ、商品名)` を表示）
+13. ItemCode右側に価格表示
+14. Excelエクスポート (`/api/pos/drafts/{draftId}/export`)
+15. エクスポート時に `PresetMenuButtonMaster` を `(A,B,C)`= `(PageNumber, ButtonColumnNumber, ButtonRowNumber)` 順で整列再構築
+16. エクスポート時に `PresetMenuMaster` 再構築、`ItemMaster.UnitPrice` 更新、削除ボタン行の実質除去（再構築で未出力）
 
 ## アーキテクチャ概要
 この実装は、**ドメインモデル (`PosConfig`) を中心に置いた凹型レイヤ（ヘキサゴナル寄り）** の構成です。
@@ -58,7 +65,7 @@
 - `spring/src/main/java/com/example/demo/controller/PosImportController.java`
   - Import API。アップロードファイルを `ImportPosUseCase` に渡し、初期カテゴリ/初期ページを返却。
 - `spring/src/main/java/com/example/demo/controller/PosDraftController.java`
-  - Draft編集API群（ページ取得、swap、追加、削除、価格変更、カテゴリ追加削除、export）。
+  - Draft編集API群（ページ取得、swap、追加、削除、価格変更、カテゴリ追加削除、グリッド変更、undo/redo、履歴取得・ジャンプ、export）。
 - `spring/src/main/java/com/example/demo/controller/GlobalExceptionHandler.java`
   - 例外を `ErrorResponse` へ統一変換（400/404/500）。
 - `spring/src/main/java/com/example/demo/controller/CorsConfig.java`
@@ -68,18 +75,36 @@
 - `spring/src/main/java/com/example/demo/service/ImportPosService.java`
   - Excel読込、`PosConfig` 生成、`PosDraft` 保存、`draftId` 発行。
 - `spring/src/main/java/com/example/demo/service/GetPageService.java`
-  - UI編集ユースケースを集約。
-  - `swapButtons`, `addButton`, `deleteButton`, `updateUnitPrice`, `addCategory`, `deleteCategory` を実行し、更新後ドラフトを保存。
+  - ページ取得専用（`getPage` のみ）。
+- `spring/src/main/java/com/example/demo/service/SwapButtonsService.java`
+- `spring/src/main/java/com/example/demo/service/AddButtonService.java`
+- `spring/src/main/java/com/example/demo/service/DeleteButtonService.java`
+- `spring/src/main/java/com/example/demo/service/UpdateUnitPriceService.java`
+- `spring/src/main/java/com/example/demo/service/AddCategoryService.java`
+- `spring/src/main/java/com/example/demo/service/DeleteCategoryService.java`
+- `spring/src/main/java/com/example/demo/service/UpdateCategoryGridService.java`
+  - それぞれの編集操作をユースケース単位で実行し、更新後ドラフトを保存（SRP分割済み）。
+- `spring/src/main/java/com/example/demo/service/UndoDraftService.java`
+- `spring/src/main/java/com/example/demo/service/RedoDraftService.java`
+- `spring/src/main/java/com/example/demo/service/GetDraftHistoryService.java`
+- `spring/src/main/java/com/example/demo/service/JumpDraftHistoryService.java`
+  - Undo/Redo/履歴取得/履歴ジャンプの編集状態制御。
+- `spring/src/main/java/com/example/demo/service/GetItemCatalogService.java`
+  - 空セル追加用の商品カタログを返却。
 - `spring/src/main/java/com/example/demo/service/ExportPosService.java`
   - ドラフト取得後、`PosConfigExporter` でExcelへ反映。
+- `spring/src/main/java/com/example/demo/service/DraftServiceSupport.java`
+  - draft/page取得、履歴付き保存、`ItemCatalog` キャッシュ読込などの共通処理。
 
 ### 3. Domain層（中心）
 - `spring/src/main/java/com/example/demo/model/PosConfig.java`
   - ドメイン集約ルート。
   - 上段カテゴリ (`Category`) と下段ページ (`Page`) を保持。
-  - 主要操作は `swapButtons`, `addButton`, `deleteButton`, `updateUnitPrice`, `addCategory`, `deleteCategory`。
+  - 主要操作は `swapButtons`, `addButton`, `deleteButton`, `updateUnitPrice`, `addCategory`, `deleteCategory`, `updateCategoryGrid`。
 - `spring/src/main/java/com/example/demo/model/PosDraft.java`
   - `draftId + PosConfig + originalExcelBytes` の編集セッション単位。
+  - `history`, `historyEntries`, `historyIndex` を保持し、`undo`, `redo`, `jumpToHistoryIndex` を提供。
+  - `ItemCatalog` を保持し、再パース回数を抑制。
 - `spring/src/main/java/com/example/demo/model/PosConfigSource.java`
   - ReaderがExcelから抽出した中間データ。
 - `spring/src/main/java/com/example/demo/model/ItemCatalog.java`
@@ -103,21 +128,27 @@
 - `spring/src/main/java/com/example/demo/dao/InMemoryDraftRepository.java`
   - メモリ + `.ser` ファイルへ保存（デフォルト: `${java.io.tmpdir}/flippers-drafts`）。
 
-## Vue構成（`vue/src/App.vue`中心）
-現状フロントは `App.vue` に機能を集約しています。
+## Vue構成（分割後）
+現状フロントは、`App.vue` をシェルとして composable + component に分割済みです。
 
-- `state`: `draftId`, `categories`, `page`, `selectedPageNumber`, `loading`, `error`
-- `dragState`: ドラッグ中セル
-- `addDialog`: 空セル追加ダイアログ
-- `priceDialog`: 価格変更ダイアログ
-- `categoryDialog`: カテゴリ追加ダイアログ
-- Import/Export
-- 上段カテゴリタブ切り替え
-- 下段ボタンのドラッグ入れ替え
-- 空セル追加（緑+）
-- 既存ボタン削除（赤×）
-- 価格変更（青-）
-- カテゴリ追加/削除
+- `vue/src/composables/usePosDraft.js`
+  - 状態管理 + API呼び出し（Import/Export、編集操作、Undo/Redo、履歴取得、履歴ジャンプ）。
+- `vue/src/composables/useDragDrop.js`
+  - 下段グリッドのドラッグ&ドロップ制御。
+- `vue/src/components/pos/CategoryTabs.vue`
+  - 上段カテゴリ表示、カテゴリ追加/削除操作。
+- `vue/src/components/pos/ButtonGrid.vue`
+  - 下段グリッド表示、ボタン追加/削除/価格変更/ドラッグ、`Page (col x row)` 右側のグリッド変更ボタン。
+- `vue/src/components/pos/AddDialog.vue`
+  - 空セル追加ダイアログ（カテゴリ絞り込み + 商品選択）。
+- `vue/src/components/pos/PriceDialog.vue`
+  - 価格変更ダイアログ。
+- `vue/src/components/pos/CategoryDialog.vue`
+  - カテゴリ追加ダイアログ。
+- `vue/src/components/pos/GridDialog.vue`
+  - グリッド（列/行）変更ダイアログ。
+- `vue/src/components/pos/EditHistoryPanel.vue`
+  - 編集履歴表示（折りたたみ、展開、現在位置表示、クリックジャンプ）。
 
 ## API一覧（実装済み）
 - `POST /api/pos/import`
@@ -129,6 +160,11 @@
 - `GET /api/pos/drafts/{draftId}/item-categories`
 - `POST /api/pos/drafts/{draftId}/categories`
 - `DELETE /api/pos/drafts/{draftId}/categories/{pageNumber}`
+- `PATCH /api/pos/drafts/{draftId}/categories/{pageNumber}/grid`
+- `POST /api/pos/drafts/{draftId}/undo`
+- `POST /api/pos/drafts/{draftId}/redo`
+- `GET /api/pos/drafts/{draftId}/history`
+- `POST /api/pos/drafts/{draftId}/history/jump?index={historyIndex}`
 - `GET /api/pos/drafts/{draftId}/export`
 
 ## 凹型レイヤ観点での補足
@@ -136,8 +172,9 @@
 
 - 良い点: ドメイン `PosConfig` に編集ルールが集約され、UI/Excel実装が直接ルールを持たない。
 - 良い点: I/O境界が `port` で抽象化されており、Reader/Exporter/Repositoryを交換しやすい。
-- 今後改善余地: `GetPageService` が操作種類ごとに肥大化しつつあるため、ユースケース単位クラス分割の余地あり。
-- 今後改善余地: フロントが `App.vue` 一枚に集約されているため、将来的には composable/components 分割が有効。
+- 改善済み: `GetPageService` に集約されていた編集処理はユースケース単位へ分割済み。
+- 改善済み: フロントは `usePosDraft/useDragDrop` + `components/pos/*` へ分割済み。
+- 改善済み: `ItemCatalog` は `PosDraft` にキャッシュされ、追加操作ごとのExcel再パースを回避。
 
 ## 起動方法（ローカル）
 ### Spring

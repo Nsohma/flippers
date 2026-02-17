@@ -1,22 +1,23 @@
 package com.example.demo.service;
 
-import com.example.demo.model.PosConfig;
 import com.example.demo.model.PosDraft;
 import com.example.demo.service.port.DraftRepository;
 import org.springframework.stereotype.Service;
 
 @Service
-public class GetPageService implements GetPageUseCase {
+public class UndoDraftService implements UndoDraftUseCase {
 
     private final DraftRepository draftRepository;
 
-    public GetPageService(DraftRepository draftRepository) {
+    public UndoDraftService(DraftRepository draftRepository) {
         this.draftRepository = draftRepository;
     }
 
     @Override
-    public PosConfig.Page getPage(String draftId, int pageNumber) {
+    public PosDraft undo(String draftId) {
         PosDraft draft = DraftServiceSupport.requireDraft(draftRepository, draftId);
-        return DraftServiceSupport.requirePage(draft, pageNumber);
+        PosDraft updatedDraft = draft.undo();
+        draftRepository.save(updatedDraft);
+        return updatedDraft;
     }
 }
