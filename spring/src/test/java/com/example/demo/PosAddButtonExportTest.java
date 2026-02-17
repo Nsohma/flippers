@@ -102,6 +102,55 @@ class PosAddButtonExportTest {
         assertDataRowsAreSortedAndContiguous(exported);
     }
 
+    @Test
+    void export_moves_button_when_target_cell_is_empty() throws Exception {
+        byte[] originalBytes = Files.readAllBytes(ORIGINAL);
+
+        PoiPosConfigReader reader = new PoiPosConfigReader();
+        PosConfigSource source = reader.read(new ByteArrayInputStream(originalBytes));
+        PosConfig config = PosConfig.fromSource(source);
+
+        MoveTarget target = findMoveTarget(config);
+        PosConfig.Button sourceButton = target.sourceButton();
+
+        PosConfig updated = config.swapButtons(
+                target.pageNumber(),
+                sourceButton.getCol(),
+                sourceButton.getRow(),
+                target.emptyCol(),
+                target.emptyRow()
+        );
+
+        PoiPosConfigExporter exporter = new PoiPosConfigExporter();
+        byte[] exported = exporter.export(originalBytes, updated);
+
+        assertTrue(
+                existsButtonRow(
+                        exported,
+                        target.pageNumber(),
+                        target.emptyCol(),
+                        target.emptyRow(),
+                        sourceButton.getLabel(),
+                        sourceButton.getItemCode()
+                ),
+                "moved button row was not found at target empty cell"
+        );
+
+        assertFalse(
+                existsButtonRow(
+                        exported,
+                        target.pageNumber(),
+                        sourceButton.getCol(),
+                        sourceButton.getRow(),
+                        sourceButton.getLabel(),
+                        sourceButton.getItemCode()
+                ),
+                "moved button row still remains at source cell"
+        );
+
+        assertDataRowsAreSortedAndContiguous(exported);
+    }
+
     private static TargetCell findFirstEmptyCell(PosConfig config) {
         for (PosConfig.Category category : config.getCategories()) {
             PosConfig.Page page = config.getPage(category.getPageNumber());
@@ -122,6 +171,29 @@ class PosAddButtonExportTest {
             }
         }
         fail("no empty cell exists");
+        return null;
+    }
+
+    private static MoveTarget findMoveTarget(PosConfig config) {
+        for (PosConfig.Category category : config.getCategories()) {
+            PosConfig.Page page = config.getPage(category.getPageNumber());
+            if (page == null || page.getButtons().isEmpty()) continue;
+
+            Set<String> occupied = new HashSet<>();
+            for (PosConfig.Button button : page.getButtons()) {
+                occupied.add(button.getCol() + "-" + button.getRow());
+            }
+
+            for (int row = 1; row <= page.getRows(); row++) {
+                for (int col = 1; col <= page.getCols(); col++) {
+                    String key = col + "-" + row;
+                    if (!occupied.contains(key)) {
+                        return new MoveTarget(page.getPageNumber(), page.getButtons().get(0), col, row);
+                    }
+                }
+            }
+        }
+        fail("no page has both button and empty cell");
         return null;
     }
 
@@ -268,6 +340,9 @@ class PosAddButtonExportTest {
     }
 
     private record TargetCell(int pageNumber, int col, int row) {
+    }
+
+    private record MoveTarget(int pageNumber, PosConfig.Button sourceButton, int emptyCol, int emptyRow) {
     }
 
     private record ButtonKey(int page, int col, int row) implements Comparable<ButtonKey> {

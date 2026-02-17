@@ -174,6 +174,12 @@ public class PosConfig implements Serializable {
             if (fromCol == toCol && fromRow == toRow) {
                 return this;
             }
+            if (toCol < 1 || toCol > cols) {
+                throw new IllegalArgumentException("target col out of range: " + toCol);
+            }
+            if (toRow < 1 || toRow > rows) {
+                throw new IllegalArgumentException("target row out of range: " + toRow);
+            }
 
             int fromIndex = -1;
             int toIndex = -1;
@@ -189,16 +195,18 @@ public class PosConfig implements Serializable {
             if (fromIndex < 0) {
                 throw new IllegalArgumentException("source button not found: (" + fromCol + "," + fromRow + ")");
             }
+
+            List<Button> updatedButtons = new ArrayList<>(buttons);
+            Button fromButton = updatedButtons.get(fromIndex);
             if (toIndex < 0) {
-                throw new IllegalArgumentException("target button not found: (" + toCol + "," + toRow + ")");
+                updatedButtons.set(fromIndex, fromButton.withPosition(toCol, toRow));
+                return new Page(pageNumber, cols, rows, List.copyOf(updatedButtons));
             }
 
-            List<Button> swappedButtons = new ArrayList<>(buttons);
-            Button fromButton = swappedButtons.get(fromIndex);
-            Button toButton = swappedButtons.get(toIndex);
-            swappedButtons.set(fromIndex, toButton.withPosition(fromCol, fromRow));
-            swappedButtons.set(toIndex, fromButton.withPosition(toCol, toRow));
-            return new Page(pageNumber, cols, rows, List.copyOf(swappedButtons));
+            Button toButton = updatedButtons.get(toIndex);
+            updatedButtons.set(fromIndex, toButton.withPosition(fromCol, fromRow));
+            updatedButtons.set(toIndex, fromButton.withPosition(toCol, toRow));
+            return new Page(pageNumber, cols, rows, List.copyOf(updatedButtons));
         }
 
         public Page addButton(Button button) {

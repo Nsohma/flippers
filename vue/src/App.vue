@@ -333,7 +333,7 @@ function onButtonDragStart(cell, event) {
 function onCellDragOver(cell, event) {
   if (state.loading) return;
   if (!dragState.sourceKey) return;
-  if (!cell?.button) return;
+  if (!cell) return;
   if (cell.key === dragState.sourceKey) return;
   event.preventDefault();
   if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
@@ -357,14 +357,13 @@ async function onCellDrop(cell, event) {
     return;
   }
 
-  if (!cell?.button || cell.key === sourceKey) {
+  if (!cell || cell.key === sourceKey) {
     resetDragState();
     return;
   }
 
   const sourceButton = buttonMap.value.get(sourceKey);
-  const targetButton = buttonMap.value.get(cell.key);
-  if (!sourceButton || !targetButton) {
+  if (!sourceButton) {
     resetDragState();
     return;
   }
@@ -380,8 +379,8 @@ async function onCellDrop(cell, event) {
         body: JSON.stringify({
           fromCol: sourceButton.col,
           fromRow: sourceButton.row,
-          toCol: targetButton.col,
-          toRow: targetButton.row,
+          toCol: cell.col,
+          toRow: cell.row,
         }),
       },
     );
@@ -454,7 +453,7 @@ function onButtonDragEnd() {
             'is-empty': !cell.button,
             'has-button': !!cell.button,
             'drag-source': dragState.sourceKey === cell.key,
-            'drag-over': dragState.overKey === cell.key && cell.button,
+            'drag-over': dragState.overKey === cell.key,
           }"
           @dragover="onCellDragOver(cell, $event)"
           @dragleave="onCellDragLeave(cell)"
