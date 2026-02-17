@@ -1,7 +1,8 @@
 <script setup>
 import { computed, reactive, ref } from "vue";
 
-const API_BASE = "http://localhost:8080/api/pos";
+const envApiBase = (import.meta.env.VITE_API_BASE ?? "").trim();
+const API_BASE = (envApiBase || "/api/pos").replace(/\/+$/, "");
 
 const state = reactive({
   draftId: "",

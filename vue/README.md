@@ -36,3 +36,14 @@ npm run dev
 ```sh
 npm run build
 ```
+
+## API endpoint
+
+Frontend API base can be configured with `VITE_API_BASE`.
+
+```sh
+# example (.env.local)
+VITE_API_BASE=/api/pos
+```
+
+If omitted, the app defaults to `/api/pos` (works with Vite dev proxy).
