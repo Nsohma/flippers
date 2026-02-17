@@ -30,6 +30,13 @@ const addDialog = reactive({
   categoryCode: "",
   search: "",
 });
+const priceDialog = reactive({
+  open: false,
+  buttonId: "",
+  label: "",
+  itemCode: "",
+  unitPrice: "",
+});
 
 // (col,row) -> button を引けるMapにしておくと描画が楽
 const buttonMap = computed(() => {
@@ -105,6 +112,7 @@ async function importExcel() {
     state.page = data.initialPage ?? null;
     state.selectedPageNumber = state.page?.pageNumber ?? (state.categories[0]?.pageNumber ?? null);
     closeAddDialog();
+    closePriceDialog();
     resetCatalogState();
     void loadItemCatalog();
   } catch (e) {
@@ -125,6 +133,7 @@ async function loadPage(pageNumber) {
     state.page = page;
     state.selectedPageNumber = pageNumber;
     closeAddDialog();
+    closePriceDialog();
   } catch (e) {
     state.error = String(e);
   } finally {
@@ -228,11 +237,74 @@ function closeAddDialog() {
   addDialog.search = "";
 }
 
+function closePriceDialog() {
+  priceDialog.open = false;
+  priceDialog.buttonId = "";
+  priceDialog.label = "";
+  priceDialog.itemCode = "";
+  priceDialog.unitPrice = "";
+}
+
+function openPriceDialog(button) {
+  if (state.loading) return;
+  if (!button?.buttonId) return;
+
+  closeAddDialog();
+  state.error = "";
+  priceDialog.buttonId = button.buttonId;
+  priceDialog.label = button.label ?? "";
+  priceDialog.itemCode = button.itemCode ?? "";
+  priceDialog.unitPrice = String(button.unitPrice ?? "").trim();
+  priceDialog.open = true;
+}
+
+async function submitUnitPriceUpdate() {
+  if (state.loading) return;
+  if (!priceDialog.open || !state.page || !state.draftId) return;
+
+  const normalized = String(priceDialog.unitPrice ?? "").trim().replace(/,/g, "");
+  if (!normalized) {
+    state.error = "価格を入力してください";
+    return;
+  }
+  if (!/^\d+(\.\d+)?$/.test(normalized)) {
+    state.error = "価格は数字で入力してください";
+    return;
+  }
+
+  state.error = "";
+  state.loading = true;
+  try {
+    const res = await fetch(
+      `${API_BASE}/drafts/${state.draftId}/pages/${state.page.pageNumber}/buttons/unit-price`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          buttonId: priceDialog.buttonId,
+          unitPrice: normalized,
+        }),
+      },
+    );
+    if (!res.ok) {
+      throw new Error(await readApiError(res, `Update unit price failed: ${res.status}`));
+    }
+
+    state.page = await res.json();
+    closePriceDialog();
+  } catch (e) {
+    state.error = String(e);
+  } finally {
+    state.loading = false;
+  }
+}
+
 async function openAddDialog(cell) {
   if (state.loading) return;
   if (!cell || cell.button) return;
   if (!state.draftId || !state.page) return;
 
+  closePriceDialog();
   state.error = "";
   const ready = await ensureItemCatalogLoaded();
   if (!ready) {
@@ -308,6 +380,9 @@ async function deleteButton(button) {
     }
 
     state.page = await res.json();
+    if (priceDialog.open && priceDialog.buttonId === button.buttonId) {
+      closePriceDialog();
+    }
   } catch (e) {
     state.error = String(e);
   } finally {
@@ -485,6 +560,15 @@ function onButtonDragEnd() {
           >
             ×
           </button>
+          <button
+            v-if="cell.button"
+            class="price-trigger"
+            title="この商品の価格を変更"
+            :disabled="state.loading"
+            @click.stop="openPriceDialog(cell.button)"
+          >
+            -
+          </button>
           <div v-else class="empty">
             <button
               class="add-trigger"
@@ -543,6 +627,38 @@ function onButtonDragEnd() {
             </span>
           </button>
           <div v-if="!filteredAddItems.length" class="item-empty">該当商品がありません</div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="priceDialog.open" class="modal-backdrop" @click="closePriceDialog">
+      <div class="price-modal" @click.stop>
+        <div class="add-modal-head">
+          <h2>価格変更</h2>
+          <button class="close-btn" type="button" @click="closePriceDialog">×</button>
+        </div>
+
+        <div class="add-target">{{ priceDialog.label }}</div>
+        <div class="add-target">#{{ priceDialog.itemCode }}</div>
+
+        <label class="field-label" for="unit-price-input">新しい価格</label>
+        <input
+          id="unit-price-input"
+          v-model="priceDialog.unitPrice"
+          class="item-search"
+          type="text"
+          inputmode="decimal"
+          placeholder="例: 1280"
+          @keydown.enter.prevent="submitUnitPriceUpdate"
+        />
+
+        <div class="price-actions">
+          <button class="price-cancel" type="button" :disabled="state.loading" @click="closePriceDialog">
+            キャンセル
+          </button>
+          <button class="price-save" type="button" :disabled="state.loading" @click="submitUnitPriceUpdate">
+            変更する
+          </button>
         </div>
       </div>
     </div>
@@ -608,6 +724,31 @@ function onButtonDragEnd() {
   transform: scale(1);
 }
 .delete-trigger:disabled { opacity: 0.3; pointer-events: none; }
+.price-trigger {
+  position: absolute;
+  right: 8px;
+  top: 34px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid #2f6ac9;
+  background: #3f86f6;
+  color: #fff;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s ease, transform .12s ease;
+  transform: scale(0.9);
+  z-index: 2;
+}
+.has-button:hover .price-trigger {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+}
+.price-trigger:disabled { opacity: 0.3; pointer-events: none; }
 .drag-source { outline: 2px solid #6c8cff; outline-offset: 1px; }
 .drag-over { background: #eef3ff; border-color: #9cb1ff; }
 .label { font-weight: 700; line-height: 1.2; }
@@ -629,6 +770,17 @@ function onButtonDragEnd() {
   width: min(720px, 100%);
   max-height: min(82vh, 720px);
   overflow: hidden;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #ddd;
+  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.2);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.price-modal {
+  width: min(420px, 100%);
   background: #fff;
   border-radius: 12px;
   border: 1px solid #ddd;
@@ -692,6 +844,16 @@ function onButtonDragEnd() {
   white-space: nowrap;
 }
 .item-empty { color: #666; font-size: 13px; padding: 8px 4px; }
+.price-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+.price-cancel,
+.price-save {
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.price-cancel { background: #f6f6f6; }
+.price-save { background: #3f86f6; border-color: #2f6ac9; color: #fff; }
 
 /* いったんstyleKeyは軽い差だけ（あとであなたの色仕様に合わせて本実装） */
 .style-1 { border-color: #bbb; }

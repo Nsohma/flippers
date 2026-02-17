@@ -125,6 +125,22 @@ public class GetPageService implements GetPageUseCase {
         return updatedConfig.getPage(pageNumber);
     }
 
+    @Override
+    public PosConfig.Page updateUnitPrice(String draftId, int pageNumber, String buttonId, String unitPrice) {
+        PosDraft draft = draftRepository
+                .findById(draftId)
+                .orElseThrow(() -> new NotFoundException("draft not found: " + draftId));
+
+        PosConfig.Page currentPage = draft.getConfig().getPage(pageNumber);
+        if (currentPage == null) throw new NotFoundException("page not found: " + pageNumber);
+
+        String normalizedUnitPrice = normalizeUnitPrice(unitPrice);
+        PosConfig updatedConfig = draft.getConfig().updateUnitPrice(pageNumber, buttonId, normalizedUnitPrice);
+        PosDraft updatedDraft = new PosDraft(draftId, updatedConfig, draft.getOriginalExcelBytes());
+        draftRepository.save(updatedDraft);
+        return updatedConfig.getPage(pageNumber);
+    }
+
     private ItemCatalog loadItemCatalog(PosDraft draft) {
         try (ByteArrayInputStream in = new ByteArrayInputStream(draft.getOriginalExcelBytes())) {
             PosConfigSource source = reader.read(in);
@@ -146,5 +162,19 @@ public class GetPageService implements GetPageUseCase {
             }
         }
         return 1;
+    }
+
+    private static String normalizeUnitPrice(String unitPrice) {
+        if (unitPrice == null) {
+            throw new IllegalArgumentException("unitPrice is required");
+        }
+        String normalized = unitPrice.trim().replace(",", "");
+        if (normalized.isEmpty()) {
+            throw new IllegalArgumentException("unitPrice is required");
+        }
+        if (!normalized.matches("^\\d+(\\.\\d+)?$")) {
+            throw new IllegalArgumentException("unitPrice must be numeric");
+        }
+        return normalized;
     }
 }

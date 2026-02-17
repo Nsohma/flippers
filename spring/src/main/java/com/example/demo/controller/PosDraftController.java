@@ -5,6 +5,7 @@ import com.example.demo.controller.dto.DeleteButtonRequest;
 import com.example.demo.controller.dto.ItemCatalogResponse;
 import com.example.demo.controller.dto.PageResponse;
 import com.example.demo.controller.dto.SwapButtonsRequest;
+import com.example.demo.controller.dto.UpdateUnitPriceRequest;
 import com.example.demo.model.ItemCatalog;
 import com.example.demo.model.PosConfig;
 import com.example.demo.service.ExportPosUseCase;
@@ -94,6 +95,24 @@ public class PosDraftController {
                 draftId,
                 pageNumber,
                 req.buttonId
+        );
+        return toPageResponse(page);
+    }
+
+    @PatchMapping("/{draftId}/pages/{pageNumber}/buttons/unit-price")
+    public PageResponse updateUnitPrice(
+            @PathVariable String draftId,
+            @PathVariable int pageNumber,
+            @RequestBody UpdateUnitPriceRequest req
+    ) {
+        if (req == null) {
+            throw new IllegalArgumentException("request body is required");
+        }
+        PosConfig.Page page = getPageUseCase.updateUnitPrice(
+                draftId,
+                pageNumber,
+                req.buttonId,
+                req.unitPrice
         );
         return toPageResponse(page);
     }

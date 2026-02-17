@@ -151,6 +151,32 @@ class PosAddButtonExportTest {
         assertDataRowsAreSortedAndContiguous(exported);
     }
 
+    @Test
+    void export_updates_item_master_unit_price_from_button_edit() throws Exception {
+        byte[] originalBytes = Files.readAllBytes(ORIGINAL);
+
+        PoiPosConfigReader reader = new PoiPosConfigReader();
+        PosConfigSource source = reader.read(new ByteArrayInputStream(originalBytes));
+        PosConfig config = PosConfig.fromSource(source);
+
+        PosConfig.Button targetButton = findFirstButtonWithItemCode(config);
+        String newUnitPrice = "9876";
+        PosConfig updated = config.updateUnitPrice(
+                findPageNumberOfButton(config, targetButton.getButtonId()),
+                targetButton.getButtonId(),
+                newUnitPrice
+        );
+
+        PoiPosConfigExporter exporter = new PoiPosConfigExporter();
+        byte[] exported = exporter.export(originalBytes, updated);
+
+        assertEquals(
+                newUnitPrice,
+                readItemMasterUnitPriceByItemCode(exported, targetButton.getItemCode()),
+                "ItemMaster.UnitPrice was not updated"
+        );
+    }
+
     private static TargetCell findFirstEmptyCell(PosConfig config) {
         for (PosConfig.Category category : config.getCategories()) {
             PosConfig.Page page = config.getPage(category.getPageNumber());
@@ -205,6 +231,30 @@ class PosAddButtonExportTest {
         }
         fail("catalog has no items");
         return null;
+    }
+
+    private static PosConfig.Button findFirstButtonWithItemCode(PosConfig config) {
+        for (PosConfig.Page page : config.getPagesByPageNumber().values()) {
+            for (PosConfig.Button button : page.getButtons()) {
+                if (button.getItemCode() != null && !button.getItemCode().isBlank()) {
+                    return button;
+                }
+            }
+        }
+        fail("no button with itemCode exists");
+        return null;
+    }
+
+    private static int findPageNumberOfButton(PosConfig config, String buttonId) {
+        for (Map.Entry<Integer, PosConfig.Page> entry : config.getPagesByPageNumber().entrySet()) {
+            for (PosConfig.Button button : entry.getValue().getButtons()) {
+                if (buttonId.equals(button.getButtonId())) {
+                    return entry.getKey();
+                }
+            }
+        }
+        fail("buttonId not found: " + buttonId);
+        return -1;
     }
 
     private static boolean existsButtonRow(
@@ -337,6 +387,42 @@ class PosAddButtonExportTest {
                 seenData = true;
             }
         }
+    }
+
+    private static String readItemMasterUnitPriceByItemCode(byte[] bytes, String itemCode) throws Exception {
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            Sheet sheet = wb.getSheet("ItemMaster");
+            if (sheet == null) fail("ItemMaster sheet not found");
+
+            DataFormatter formatter = new DataFormatter();
+            int headerRowIndex = findHeaderRowIndex(sheet, formatter, "ItemCode");
+            if (headerRowIndex < 0) fail("ItemMaster header row not found");
+            Row headerRow = sheet.getRow(headerRowIndex);
+            if (headerRow == null) fail("ItemMaster header row not found");
+
+            Map<String, Integer> headerIndex = toHeaderIndexMap(headerRow, formatter);
+            int hItemCode = requireColumn(headerIndex, "ItemCode");
+            int hUnitPrice = requireColumn(headerIndex, "UnitPrice");
+
+            for (int r = headerRowIndex + 1; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+                String code = formatter.formatCellValue(row.getCell(hItemCode)).trim();
+                if (!itemCode.equals(code)) continue;
+                String price = formatter.formatCellValue(row.getCell(hUnitPrice)).trim();
+                return normalizeNumericText(price);
+            }
+        }
+        fail("itemCode not found in ItemMaster: " + itemCode);
+        return "";
+    }
+
+    private static String normalizeNumericText(String text) {
+        String trimmed = text == null ? "" : text.trim();
+        if (trimmed.endsWith(".0")) {
+            return trimmed.substring(0, trimmed.length() - 2);
+        }
+        return trimmed;
     }
 
     private record TargetCell(int pageNumber, int col, int row) {

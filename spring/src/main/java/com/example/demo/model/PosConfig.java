@@ -86,6 +86,51 @@ public class PosConfig implements Serializable {
         return new PosConfig(categories, Collections.unmodifiableMap(updatedPages));
     }
 
+    public PosConfig updateUnitPrice(int pageNumber, String buttonId, String unitPrice) {
+        Page page = pagesByPageNumber.get(pageNumber);
+        if (page == null) {
+            throw new IllegalArgumentException("page not found: " + pageNumber);
+        }
+        if (buttonId == null || buttonId.isBlank()) {
+            throw new IllegalArgumentException("buttonId is required");
+        }
+
+        Button target = null;
+        for (Button button : page.getButtons()) {
+            if (buttonId.equals(button.getButtonId())) {
+                target = button;
+                break;
+            }
+        }
+        if (target == null) {
+            throw new IllegalArgumentException("button not found: " + buttonId);
+        }
+        if (target.getItemCode() == null || target.getItemCode().isBlank()) {
+            throw new IllegalArgumentException("itemCode is empty for button: " + buttonId);
+        }
+
+        String targetItemCode = target.getItemCode();
+        Map<Integer, Page> updatedPages = new LinkedHashMap<>();
+        for (Map.Entry<Integer, Page> entry : pagesByPageNumber.entrySet()) {
+            Page oldPage = entry.getValue();
+            List<Button> updatedButtons = new ArrayList<>(oldPage.getButtons().size());
+            for (Button button : oldPage.getButtons()) {
+                if (targetItemCode.equals(button.getItemCode())) {
+                    updatedButtons.add(button.withUnitPrice(unitPrice));
+                } else {
+                    updatedButtons.add(button);
+                }
+            }
+            updatedPages.put(entry.getKey(), new Page(
+                    oldPage.getPageNumber(),
+                    oldPage.getCols(),
+                    oldPage.getRows(),
+                    List.copyOf(updatedButtons)
+            ));
+        }
+        return new PosConfig(categories, Collections.unmodifiableMap(updatedPages));
+    }
+
     private boolean hasButtonId(String buttonId) {
         for (Page page : pagesByPageNumber.values()) {
             for (Button button : page.getButtons()) {
@@ -279,6 +324,10 @@ public class PosConfig implements Serializable {
 
         public Button withPosition(int newCol, int newRow) {
             return new Button(newCol, newRow, label, styleKey, itemCode, unitPrice, buttonId);
+        }
+
+        public Button withUnitPrice(String newUnitPrice) {
+            return new Button(col, row, label, styleKey, itemCode, newUnitPrice, buttonId);
         }
     }
 }
