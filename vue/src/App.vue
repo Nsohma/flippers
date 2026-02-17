@@ -14,6 +14,10 @@ const state = reactive({
 });
 
 const fileRef = ref(null);
+const dragState = reactive({
+  sourceKey: "",
+  overKey: "",
+});
 
 // (col,row) -> button を引けるMapにしておくと描画が楽
 const buttonMap = computed(() => {
@@ -86,6 +90,66 @@ async function loadPage(pageNumber) {
 function buttonClass(styleKey) {
   return `btn style-${styleKey}`;
 }
+
+function resetDragState() {
+  dragState.sourceKey = "";
+  dragState.overKey = "";
+}
+
+function onButtonDragStart(cell, event) {
+  if (!cell?.button || state.loading) return;
+  dragState.sourceKey = cell.key;
+  dragState.overKey = "";
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", cell.key);
+  }
+}
+
+function onCellDragOver(cell, event) {
+  if (!dragState.sourceKey) return;
+  if (!cell?.button) return;
+  if (cell.key === dragState.sourceKey) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  dragState.overKey = cell.key;
+}
+
+function onCellDragLeave(cell) {
+  if (dragState.overKey === cell.key) {
+    dragState.overKey = "";
+  }
+}
+
+function onCellDrop(cell, event) {
+  if (!dragState.sourceKey) return;
+  event.preventDefault();
+
+  if (!cell?.button || cell.key === dragState.sourceKey) {
+    resetDragState();
+    return;
+  }
+
+  const sourceButton = buttonMap.value.get(dragState.sourceKey);
+  const targetButton = buttonMap.value.get(cell.key);
+  if (!sourceButton || !targetButton) {
+    resetDragState();
+    return;
+  }
+
+  const sourceCol = sourceButton.col;
+  const sourceRow = sourceButton.row;
+  sourceButton.col = targetButton.col;
+  sourceButton.row = targetButton.row;
+  targetButton.col = sourceCol;
+  targetButton.row = sourceRow;
+
+  resetDragState();
+}
+
+function onButtonDragEnd() {
+  resetDragState();
+}
 </script>
 
 <template>
@@ -129,12 +193,26 @@ function buttonClass(styleKey) {
           gridTemplateRows: `repeat(${state.page.rows}, 72px)`,
         }"
       >
-        <div v-for="cell in gridCells" :key="cell.key" class="cell">
+        <div
+          v-for="cell in gridCells"
+          :key="cell.key"
+          class="cell"
+          :class="{
+            'drag-source': dragState.sourceKey === cell.key,
+            'drag-over': dragState.overKey === cell.key && cell.button,
+          }"
+          @dragover="onCellDragOver(cell, $event)"
+          @dragleave="onCellDragLeave(cell)"
+          @drop="onCellDrop(cell, $event)"
+        >
           <button
             v-if="cell.button"
             class="cell-btn"
             :class="buttonClass(cell.button.styleKey)"
-            title="(あとで編集ここから)"
+            title="ドラッグして他のボタン位置にドロップで入れ替え"
+            :draggable="!state.loading"
+            @dragstart="onButtonDragStart(cell, $event)"
+            @dragend="onButtonDragEnd"
           >
             <div class="label">{{ cell.button.label }}</div>
             <div class="sub">#{{ cell.button.itemCode }}</div>
@@ -156,6 +234,8 @@ function buttonClass(styleKey) {
 .cell { background: #fafafa; border: 1px dashed #e3e3e3; border-radius: 10px; padding: 6px; display: flex; align-items: stretch; justify-content: stretch; }
 .empty { width: 100%; height: 100%; }
 .cell-btn { width: 100%; border-radius: 10px; border: 1px solid #ddd; background: #fff; cursor: pointer; padding: 8px; text-align: left; }
+.drag-source { outline: 2px solid #6c8cff; outline-offset: 1px; }
+.drag-over { background: #eef3ff; border-color: #9cb1ff; }
 .label { font-weight: 700; line-height: 1.2; }
 .sub { opacity: .7; font-size: 12px; margin-top: 4px; }
 
