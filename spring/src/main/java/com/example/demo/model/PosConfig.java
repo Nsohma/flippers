@@ -43,6 +43,58 @@ public class PosConfig implements Serializable {
         return new PosConfig(categories, Collections.unmodifiableMap(updatedPages));
     }
 
+    public PosConfig addButton(
+            int pageNumber,
+            int col,
+            int row,
+            String label,
+            int styleKey,
+            String itemCode,
+            String unitPrice,
+            String buttonId
+    ) {
+        Page page = pagesByPageNumber.get(pageNumber);
+        if (page == null) {
+            throw new IllegalArgumentException("page not found: " + pageNumber);
+        }
+        if (buttonId == null || buttonId.isBlank()) {
+            throw new IllegalArgumentException("buttonId is required");
+        }
+        if (hasButtonId(buttonId)) {
+            throw new IllegalArgumentException("duplicate buttonId: " + buttonId);
+        }
+
+        Button newButton = new Button(col, row, label, styleKey, itemCode, unitPrice, buttonId);
+        Page updatedPage = page.addButton(newButton);
+        Map<Integer, Page> updatedPages = new LinkedHashMap<>(pagesByPageNumber);
+        updatedPages.put(pageNumber, updatedPage);
+        return new PosConfig(categories, Collections.unmodifiableMap(updatedPages));
+    }
+
+    public PosConfig deleteButton(int pageNumber, String buttonId) {
+        Page page = pagesByPageNumber.get(pageNumber);
+        if (page == null) {
+            throw new IllegalArgumentException("page not found: " + pageNumber);
+        }
+        if (buttonId == null || buttonId.isBlank()) {
+            throw new IllegalArgumentException("buttonId is required");
+        }
+
+        Page updatedPage = page.deleteButton(buttonId);
+        Map<Integer, Page> updatedPages = new LinkedHashMap<>(pagesByPageNumber);
+        updatedPages.put(pageNumber, updatedPage);
+        return new PosConfig(categories, Collections.unmodifiableMap(updatedPages));
+    }
+
+    private boolean hasButtonId(String buttonId) {
+        for (Page page : pagesByPageNumber.values()) {
+            for (Button button : page.getButtons()) {
+                if (buttonId.equals(button.getButtonId())) return true;
+            }
+        }
+        return false;
+    }
+
     public static PosConfig fromSource(PosConfigSource source) {
         List<Category> sortedCategories = new ArrayList<>(source.getCategories());
         sortedCategories.sort(Comparator.comparingInt(Category::getPageNumber));
@@ -147,6 +199,44 @@ public class PosConfig implements Serializable {
             swappedButtons.set(fromIndex, toButton.withPosition(fromCol, fromRow));
             swappedButtons.set(toIndex, fromButton.withPosition(toCol, toRow));
             return new Page(pageNumber, cols, rows, List.copyOf(swappedButtons));
+        }
+
+        public Page addButton(Button button) {
+            int col = button.getCol();
+            int row = button.getRow();
+            if (col < 1 || col > cols) {
+                throw new IllegalArgumentException("col out of range: " + col);
+            }
+            if (row < 1 || row > rows) {
+                throw new IllegalArgumentException("row out of range: " + row);
+            }
+            for (Button b : buttons) {
+                if (b.getCol() == col && b.getRow() == row) {
+                    throw new IllegalArgumentException("cell is already occupied: (" + col + "," + row + ")");
+                }
+            }
+
+            List<Button> updated = new ArrayList<>(buttons);
+            updated.add(button);
+            return new Page(pageNumber, cols, rows, List.copyOf(updated));
+        }
+
+        public Page deleteButton(String buttonId) {
+            int deleteIndex = -1;
+            for (int i = 0; i < buttons.size(); i++) {
+                Button button = buttons.get(i);
+                if (buttonId.equals(button.getButtonId())) {
+                    deleteIndex = i;
+                    break;
+                }
+            }
+            if (deleteIndex < 0) {
+                throw new IllegalArgumentException("button not found: " + buttonId);
+            }
+
+            List<Button> updated = new ArrayList<>(buttons);
+            updated.remove(deleteIndex);
+            return new Page(pageNumber, cols, rows, List.copyOf(updated));
         }
     }
 

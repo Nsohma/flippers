@@ -13,7 +13,10 @@ import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -28,21 +31,29 @@ public class PoiPosConfigExporter implements PosConfigExporter {
             ExcelUtil u = new ExcelUtil(wb);
             HeaderMap btnHm = HeaderMap.from(btn, u);
 
+            int bPage = btnHm.require("PageNumber");
             int bCol = btnHm.require("ButtonColumnNumber");
             int bRow = btnHm.require("ButtonRowNumber");
+            int bDesc = btnHm.require("Description");
+            int bStyle = btnHm.require("StyleKey");
+            int bSet = btnHm.require("SettingData");
 
-            Map<String, PosConfig.Button> buttonsById = indexButtons(config);
+            List<IndexedButton> sortedButtons = collectAndSortButtons(config);
 
             for (int r = btnHm.dataStartRow; r <= btn.getLastRowNum(); r++) {
                 Row row = btn.getRow(r);
                 if (row == null) continue;
+                clearButtonRow(row, bPage, bCol, bRow, bDesc, bStyle, bSet);
+            }
 
-                String buttonId = buttonRowId(r);
-                PosConfig.Button button = buttonsById.get(buttonId);
-                if (button == null) continue;
-
-                setInt(row, bCol, button.getCol());
-                setInt(row, bRow, button.getRow());
+            int writeRowIndex = btnHm.dataStartRow;
+            for (IndexedButton indexedButton : sortedButtons) {
+                Row row = btn.getRow(writeRowIndex);
+                if (row == null) {
+                    row = btn.createRow(writeRowIndex);
+                }
+                writeButtonRow(row, bPage, bCol, bRow, bDesc, bStyle, bSet, indexedButton);
+                writeRowIndex++;
             }
 
             try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
@@ -52,18 +63,64 @@ public class PoiPosConfigExporter implements PosConfigExporter {
         }
     }
 
-    private static Map<String, PosConfig.Button> indexButtons(PosConfig config) {
-        Map<String, PosConfig.Button> map = new HashMap<>();
-        for (PosConfig.Page page : config.getPagesByPageNumber().values()) {
+    private static List<IndexedButton> collectAndSortButtons(PosConfig config) {
+        List<IndexedButton> list = new ArrayList<>();
+        for (Map.Entry<Integer, PosConfig.Page> pageEntry : config.getPagesByPageNumber().entrySet()) {
+            int pageNumber = pageEntry.getKey();
+            PosConfig.Page page = pageEntry.getValue();
             for (PosConfig.Button button : page.getButtons()) {
-                String id = button.getButtonId();
-                if (id == null || id.isBlank()) {
-                    throw new IllegalArgumentException("buttonId is missing");
-                }
-                map.put(id, button);
+                list.add(new IndexedButton(pageNumber, button));
             }
         }
-        return map;
+        list.sort(
+                Comparator
+                        .comparingInt(IndexedButton::pageNumber)
+                        .thenComparingInt(v -> v.button().getCol())
+                        .thenComparingInt(v -> v.button().getRow())
+                        .thenComparing(v -> safe(v.button().getItemCode()))
+                        .thenComparing(v -> safe(v.button().getButtonId()))
+        );
+        return list;
+    }
+
+    private static String safe(String value) {
+        return value == null ? "" : value;
+    }
+
+    private static void clearButtonRow(
+            Row row,
+            int bPage,
+            int bCol,
+            int bRow,
+            int bDesc,
+            int bStyle,
+            int bSet
+    ) {
+        clearCell(row, bPage);
+        clearCell(row, bCol);
+        clearCell(row, bRow);
+        clearCell(row, bDesc);
+        clearCell(row, bStyle);
+        clearCell(row, bSet);
+    }
+
+    private static void writeButtonRow(
+            Row row,
+            int bPage,
+            int bCol,
+            int bRow,
+            int bDesc,
+            int bStyle,
+            int bSet,
+            IndexedButton indexedButton
+    ) {
+        PosConfig.Button button = indexedButton.button();
+        setInt(row, bPage, indexedButton.pageNumber());
+        setInt(row, bCol, button.getCol());
+        setInt(row, bRow, button.getRow());
+        setString(row, bDesc, button.getLabel());
+        setInt(row, bStyle, button.getStyleKey());
+        setString(row, bSet, button.getItemCode());
     }
 
     private static void setInt(Row row, int colIndex, int value) {
@@ -74,14 +131,24 @@ public class PoiPosConfigExporter implements PosConfigExporter {
         cell.setCellValue(value);
     }
 
+    private static void setString(Row row, int colIndex, String value) {
+        Cell cell = row.getCell(colIndex);
+        if (cell == null) {
+            cell = row.createCell(colIndex);
+        }
+        cell.setCellValue(value == null ? "" : value);
+    }
+
+    private static void clearCell(Row row, int colIndex) {
+        Cell cell = row.getCell(colIndex);
+        if (cell == null) return;
+        cell.setBlank();
+    }
+
     private static Sheet requireSheet(Workbook wb, String name) {
         Sheet s = wb.getSheet(name);
         if (s == null) throw new IllegalArgumentException("Sheet not found: " + name);
         return s;
-    }
-
-    private static String buttonRowId(int zeroBasedRowIndex) {
-        return SHEET_BUTTON + "#R" + (zeroBasedRowIndex + 1);
     }
 
     static class ExcelUtil {
@@ -142,5 +209,8 @@ public class PoiPosConfigExporter implements PosConfigExporter {
             }
             return 0;
         }
+    }
+
+    private record IndexedButton(int pageNumber, PosConfig.Button button) {
     }
 }

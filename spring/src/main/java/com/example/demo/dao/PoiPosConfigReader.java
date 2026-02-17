@@ -1,5 +1,6 @@
 package com.example.demo.dao;
 
+import com.example.demo.model.ItemCatalog;
 import com.example.demo.model.PosConfig;
 import com.example.demo.model.PosConfigSource;
 import org.apache.poi.ss.usermodel.*;
@@ -16,6 +17,8 @@ public class PoiPosConfigReader implements PosConfigReader {
     private static final String SHEET_MENU = "PresetMenuMaster";
     private static final String SHEET_BUTTON = "PresetMenuButtonMaster";
     private static final String SHEET_ITEM = "ItemMaster";
+    private static final String SHEET_MD_HIERARCHY = "MDHierarchyMaster";
+    private static final String SHEET_POS_ITEM = "POSItemMaster";
 
     @Override
     public PosConfigSource read(InputStream in) throws Exception {
@@ -23,12 +26,16 @@ public class PoiPosConfigReader implements PosConfigReader {
             Sheet menu = requireSheet(wb, SHEET_MENU);
             Sheet btn  = requireSheet(wb, SHEET_BUTTON);
             Sheet item = requireSheet(wb, SHEET_ITEM);
+            Sheet mdHierarchy = requireSheet(wb, SHEET_MD_HIERARCHY);
+            Sheet posItem = requireSheet(wb, SHEET_POS_ITEM);
 
             ExcelUtil u = new ExcelUtil(wb);
 
             HeaderMap menuHm = HeaderMap.from(menu, u, "PageNumber");
             HeaderMap btnHm  = HeaderMap.from(btn, u, "PageNumber");
             HeaderMap itemHm = HeaderMap.from(item, u, "ItemCode", "UnitPrice");
+            HeaderMap mdHm = HeaderMap.from(mdHierarchy, u, "MDHierarchyCode");
+            HeaderMap posHm = HeaderMap.from(posItem, u, "MDHierarchyCode", "ItemCode");
 
             // PresetMenuMaster: PageNumber, ButtonColumnCount, ButtonRowCount, Description, StyleKey
             int mPage = menuHm.require("PageNumber");
@@ -63,8 +70,17 @@ public class PoiPosConfigReader implements PosConfigReader {
             int bSet  = btnHm.require("SettingData");
 
             int iCode = itemHm.require("ItemCode");
+            Integer iName = itemHm.get("ItemName");
+            Integer iNamePrint = itemHm.get("ItemNamePrint");
             int iUnitPrice = itemHm.require("UnitPrice");
 
+            int hCode = mdHm.require("MDHierarchyCode");
+            int hDesc = mdHm.require("Description");
+
+            int pCode = posHm.require("MDHierarchyCode");
+            int pItemCode = posHm.require("ItemCode");
+
+            Map<String, ItemInfo> itemInfoByItemCode = new LinkedHashMap<>();
             Map<String, String> unitPriceByItemCode = new HashMap<>();
             for (int r = itemHm.dataStartRow; r <= item.getLastRowNum(); r++) {
                 Row row = item.getRow(r);
@@ -73,9 +89,71 @@ public class PoiPosConfigReader implements PosConfigReader {
                 String itemCode = nonNull(u.str(row.getCell(iCode)));
                 if (isBlank(itemCode)) continue;
 
+                String itemName = "";
+                if (iName != null) {
+                    itemName = nonNull(u.str(row.getCell(iName)));
+                }
+                if (isBlank(itemName) && iNamePrint != null) {
+                    itemName = nonNull(u.str(row.getCell(iNamePrint)));
+                }
                 String unitPrice = nonNull(u.str(row.getCell(iUnitPrice)));
+                itemInfoByItemCode.put(itemCode, new ItemInfo(itemName, unitPrice));
                 unitPriceByItemCode.put(itemCode, unitPrice);
             }
+
+            Map<String, String> categoryDescriptionByCode = new LinkedHashMap<>();
+            for (int r = mdHm.dataStartRow; r <= mdHierarchy.getLastRowNum(); r++) {
+                Row row = mdHierarchy.getRow(r);
+                if (row == null) continue;
+
+                String categoryCode = nonNull(u.str(row.getCell(hCode)));
+                if (isBlank(categoryCode)) continue;
+
+                String categoryDescription = nonNull(u.str(row.getCell(hDesc)));
+                categoryDescriptionByCode.put(categoryCode, categoryDescription);
+            }
+
+            Map<String, LinkedHashSet<String>> itemCodesByCategoryCode = new LinkedHashMap<>();
+            for (int r = posHm.dataStartRow; r <= posItem.getLastRowNum(); r++) {
+                Row row = posItem.getRow(r);
+                if (row == null) continue;
+
+                String categoryCode = nonNull(u.str(row.getCell(pCode)));
+                String itemCode = nonNull(u.str(row.getCell(pItemCode)));
+                if (isBlank(categoryCode) || isBlank(itemCode)) continue;
+
+                itemCodesByCategoryCode
+                        .computeIfAbsent(categoryCode, k -> new LinkedHashSet<>())
+                        .add(itemCode);
+            }
+
+            List<ItemCatalog.Category> itemCategories = new ArrayList<>();
+            Set<String> appendedCategoryCodes = new HashSet<>();
+            for (Map.Entry<String, String> entry : categoryDescriptionByCode.entrySet()) {
+                String categoryCode = entry.getKey();
+                LinkedHashSet<String> itemCodes = itemCodesByCategoryCode.get(categoryCode);
+                if (itemCodes == null || itemCodes.isEmpty()) continue;
+
+                itemCategories.add(toItemCategory(
+                        categoryCode,
+                        entry.getValue(),
+                        itemCodes,
+                        itemInfoByItemCode
+                ));
+                appendedCategoryCodes.add(categoryCode);
+            }
+            for (Map.Entry<String, LinkedHashSet<String>> entry : itemCodesByCategoryCode.entrySet()) {
+                String categoryCode = entry.getKey();
+                if (appendedCategoryCodes.contains(categoryCode)) continue;
+
+                itemCategories.add(toItemCategory(
+                        categoryCode,
+                        categoryCode,
+                        entry.getValue(),
+                        itemInfoByItemCode
+                ));
+            }
+            ItemCatalog itemCatalog = new ItemCatalog(itemCategories);
 
             List<PosConfigSource.PageButton> pageButtons = new ArrayList<>();
             for (int r = btnHm.dataStartRow; r <= btn.getLastRowNum(); r++) {
@@ -102,7 +180,7 @@ public class PoiPosConfigReader implements PosConfigReader {
                 );
             }
 
-            return new PosConfigSource(categories, pageButtons);
+            return new PosConfigSource(categories, pageButtons, itemCatalog);
         }
     }
 
@@ -117,6 +195,27 @@ public class PoiPosConfigReader implements PosConfigReader {
     private static String nonNull(String s) { return s == null ? "" : s; }
     private static String buttonRowId(int zeroBasedRowIndex) {
         return SHEET_BUTTON + "#R" + (zeroBasedRowIndex + 1);
+    }
+
+    private static ItemCatalog.Category toItemCategory(
+            String categoryCode,
+            String categoryDescription,
+            LinkedHashSet<String> itemCodes,
+            Map<String, ItemInfo> itemInfoByItemCode
+    ) {
+        List<ItemCatalog.Item> items = new ArrayList<>();
+        for (String itemCode : itemCodes) {
+            ItemInfo info = itemInfoByItemCode.get(itemCode);
+            String itemName = info == null ? itemCode : normalizeItemName(info.itemName(), itemCode);
+            String unitPrice = info == null ? "" : info.unitPrice();
+            items.add(new ItemCatalog.Item(itemCode, itemName, unitPrice));
+        }
+        String normalizedDescription = isBlank(categoryDescription) ? categoryCode : categoryDescription;
+        return new ItemCatalog.Category(categoryCode, normalizedDescription, items);
+    }
+
+    private static String normalizeItemName(String itemName, String fallback) {
+        return isBlank(itemName) ? fallback : itemName;
     }
 
     private static int parseIntStrict(String s, String field) {
@@ -156,6 +255,10 @@ public class PoiPosConfigReader implements PosConfigReader {
             return idx;
         }
 
+        Integer get(String name) {
+            return col.get(name);
+        }
+
         static HeaderMap from(Sheet sheet, ExcelUtil u, String... requiredHeaderCandidates) {
             int headerRow = findHeaderRow(sheet, u, requiredHeaderCandidates);
             Row hr = sheet.getRow(headerRow);
@@ -189,5 +292,8 @@ public class PoiPosConfigReader implements PosConfigReader {
             }
             return 0;
         }
+    }
+
+    private record ItemInfo(String itemName, String unitPrice) {
     }
 }

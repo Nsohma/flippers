@@ -1,7 +1,11 @@
 package com.example.demo.controller;
 
+import com.example.demo.controller.dto.AddButtonRequest;
+import com.example.demo.controller.dto.DeleteButtonRequest;
+import com.example.demo.controller.dto.ItemCatalogResponse;
 import com.example.demo.controller.dto.PageResponse;
 import com.example.demo.controller.dto.SwapButtonsRequest;
+import com.example.demo.model.ItemCatalog;
 import com.example.demo.model.PosConfig;
 import com.example.demo.service.ExportPosUseCase;
 import com.example.demo.service.GetPageUseCase;
@@ -51,6 +55,49 @@ public class PosDraftController {
         return toPageResponse(page);
     }
 
+    @GetMapping("/{draftId}/item-categories")
+    public ItemCatalogResponse getItemCategories(@PathVariable String draftId) {
+        ItemCatalog catalog = getPageUseCase.getItemCatalog(draftId);
+        return toItemCatalogResponse(catalog);
+    }
+
+    @PostMapping("/{draftId}/pages/{pageNumber}/buttons")
+    public PageResponse addButton(
+            @PathVariable String draftId,
+            @PathVariable int pageNumber,
+            @RequestBody AddButtonRequest req
+    ) {
+        if (req == null) {
+            throw new IllegalArgumentException("request body is required");
+        }
+        PosConfig.Page page = getPageUseCase.addButton(
+                draftId,
+                pageNumber,
+                req.col,
+                req.row,
+                req.categoryCode,
+                req.itemCode
+        );
+        return toPageResponse(page);
+    }
+
+    @DeleteMapping("/{draftId}/pages/{pageNumber}/buttons")
+    public PageResponse deleteButton(
+            @PathVariable String draftId,
+            @PathVariable int pageNumber,
+            @RequestBody DeleteButtonRequest req
+    ) {
+        if (req == null) {
+            throw new IllegalArgumentException("request body is required");
+        }
+        PosConfig.Page page = getPageUseCase.deleteButton(
+                draftId,
+                pageNumber,
+                req.buttonId
+        );
+        return toPageResponse(page);
+    }
+
     @GetMapping(
             value = "/{draftId}/export",
             produces = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -87,5 +134,23 @@ public class PosDraftController {
             return d;
         }).collect(Collectors.toList());
         return res;
+    }
+
+    private static ItemCatalogResponse toItemCatalogResponse(ItemCatalog catalog) {
+        ItemCatalogResponse response = new ItemCatalogResponse();
+        response.categories = catalog.getCategories().stream().map(category -> {
+            ItemCatalogResponse.CategoryDto dto = new ItemCatalogResponse.CategoryDto();
+            dto.code = category.getCode();
+            dto.description = category.getDescription();
+            dto.items = category.getItems().stream().map(item -> {
+                ItemCatalogResponse.ItemDto itemDto = new ItemCatalogResponse.ItemDto();
+                itemDto.itemCode = item.getItemCode();
+                itemDto.itemName = item.getItemName();
+                itemDto.unitPrice = item.getUnitPrice();
+                return itemDto;
+            }).collect(Collectors.toList());
+            return dto;
+        }).collect(Collectors.toList());
+        return response;
     }
 }

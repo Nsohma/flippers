@@ -6,10 +6,20 @@ import java.util.Objects;
 public class PosConfigSource {
     private final List<PosConfig.Category> categories;
     private final List<PageButton> pageButtons;
+    private final ItemCatalog itemCatalog;
 
     public PosConfigSource(List<PosConfig.Category> categories, List<PageButton> pageButtons) {
+        this(categories, pageButtons, ItemCatalog.empty());
+    }
+
+    public PosConfigSource(
+            List<PosConfig.Category> categories,
+            List<PageButton> pageButtons,
+            ItemCatalog itemCatalog
+    ) {
         this.categories = List.copyOf(Objects.requireNonNull(categories));
         this.pageButtons = List.copyOf(Objects.requireNonNull(pageButtons));
+        this.itemCatalog = Objects.requireNonNull(itemCatalog);
     }
 
     public List<PosConfig.Category> getCategories() {
@@ -18,6 +28,10 @@ public class PosConfigSource {
 
     public List<PageButton> getPageButtons() {
         return pageButtons;
+    }
+
+    public ItemCatalog getItemCatalog() {
+        return itemCatalog;
     }
 
     public static class PageButton {
