@@ -1,6 +1,7 @@
 package com.example.demo.controller;
 
 import com.example.demo.controller.dto.ErrorResponse;
+import com.example.demo.service.exception.InvalidPosExcelException;
 import com.example.demo.service.exception.NotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -31,6 +32,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler({
             IllegalArgumentException.class,
+            InvalidPosExcelException.class,
             MissingServletRequestPartException.class,
             MethodArgumentTypeMismatchException.class,
             MultipartException.class

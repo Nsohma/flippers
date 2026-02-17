@@ -1,9 +1,8 @@
 package com.example.demo.service;
 
 import com.example.demo.model.PosDraft;
-
-import java.io.InputStream;
+import com.example.demo.service.command.ImportPosCommand;
 
 public interface ImportPosUseCase {
-    PosDraft importExcel(InputStream in) throws Exception;
+    PosDraft importExcel(ImportPosCommand command);
 }

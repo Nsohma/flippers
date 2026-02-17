@@ -2,7 +2,9 @@ package com.example.demo.service.port;
 
 import com.example.demo.model.PosDraft;
 
+import java.util.Optional;
+
 public interface DraftRepository {
     void save(PosDraft draft);
-    PosDraft load(String draftId);
+    Optional<PosDraft> findById(String draftId);
 }

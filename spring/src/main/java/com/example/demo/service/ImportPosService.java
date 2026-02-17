@@ -1,12 +1,15 @@
 package com.example.demo.service;
 
+import com.example.demo.model.PosConfig;
+import com.example.demo.model.PosConfigSource;
+import com.example.demo.model.PosDraft;
+import com.example.demo.service.command.ImportPosCommand;
+import com.example.demo.service.exception.InvalidPosExcelException;
 import com.example.demo.service.port.DraftRepository;
 import com.example.demo.service.port.PosConfigReader;
-import com.example.demo.model.PosConfig;
-import com.example.demo.model.PosDraft;
 import org.springframework.stereotype.Service;
 
-import java.io.InputStream;
+import java.io.ByteArrayInputStream;
 import java.util.UUID;
 
 @Service
@@ -21,11 +24,22 @@ public class ImportPosService implements ImportPosUseCase {
     }
 
     @Override
-    public PosDraft importExcel(InputStream in) throws Exception {
-        PosConfig config = reader.read(in);
+    public PosDraft importExcel(ImportPosCommand command) {
+        PosConfig config = readConfig(command);
         String draftId = "dft_" + UUID.randomUUID();
         PosDraft draft = new PosDraft(draftId, config);
         draftRepository.save(draft);
         return draft;
+    }
+
+    private PosConfig readConfig(ImportPosCommand command) {
+        try (ByteArrayInputStream in = new ByteArrayInputStream(command.excelBytes())) {
+            PosConfigSource source = reader.read(in);
+            return PosConfig.fromSource(source);
+        } catch (IllegalArgumentException ex) {
+            throw new InvalidPosExcelException(ex.getMessage(), ex);
+        } catch (Exception ex) {
+            throw new InvalidPosExcelException("failed to parse excel file", ex);
+        }
     }
 }

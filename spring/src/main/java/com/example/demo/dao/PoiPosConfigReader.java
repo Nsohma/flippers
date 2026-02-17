@@ -1,6 +1,7 @@
 package com.example.demo.dao;
 
 import com.example.demo.model.PosConfig;
+import com.example.demo.model.PosConfigSource;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Component;
@@ -8,7 +9,6 @@ import com.example.demo.service.port.PosConfigReader;
 
 import java.io.InputStream;
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Component
 public class PoiPosConfigReader implements PosConfigReader {
@@ -17,7 +17,7 @@ public class PoiPosConfigReader implements PosConfigReader {
     private static final String SHEET_BUTTON = "PresetMenuButtonMaster";
 
     @Override
-    public PosConfig read(InputStream in) throws Exception {
+    public PosConfigSource read(InputStream in) throws Exception {
         try (Workbook wb = new XSSFWorkbook(in)) {
             Sheet menu = requireSheet(wb, SHEET_MENU);
             Sheet btn  = requireSheet(wb, SHEET_BUTTON);
@@ -51,9 +51,6 @@ public class PoiPosConfigReader implements PosConfigReader {
                 categories.add(new PosConfig.Category(page, cols, rows, desc, style));
             }
 
-            // PageNumber順
-            categories.sort(Comparator.comparingInt(PosConfig.Category::getPageNumber));
-
             // PresetMenuButtonMaster: PageNumber, ButtonColumnNumber, ButtonRowNumber, Description, StyleKey, SettingData
             int bPage = btnHm.require("PageNumber");
             int bCol  = btnHm.require("ButtonColumnNumber");
@@ -62,7 +59,7 @@ public class PoiPosConfigReader implements PosConfigReader {
             int bStyle= btnHm.require("StyleKey");
             int bSet  = btnHm.require("SettingData");
 
-            Map<Integer, List<PosConfig.Button>> buttonsByPage = new HashMap<>();
+            List<PosConfigSource.PageButton> pageButtons = new ArrayList<>();
             for (int r = btnHm.dataStartRow; r <= btn.getLastRowNum(); r++) {
                 Row row = btn.getRow(r);
                 if (row == null) continue;
@@ -77,24 +74,15 @@ public class PoiPosConfigReader implements PosConfigReader {
                 int style = parseIntStrict(u.str(row.getCell(bStyle)), "PresetMenuButtonMaster.StyleKey");
                 String itemCode = nonNull(u.str(row.getCell(bSet))); // SettingData
 
-                buttonsByPage.computeIfAbsent(page, k -> new ArrayList<>())
-                        .add(new PosConfig.Button(col, rowNo, desc, style, itemCode));
+                pageButtons.add(
+                        new PosConfigSource.PageButton(
+                                page,
+                                new PosConfig.Button(col, rowNo, desc, style, itemCode)
+                        )
+                );
             }
 
-            // categoryのgridSizeを正として Page を組む（表示用）
-            Map<Integer, PosConfig.Page> pages = categories.stream().collect(Collectors.toMap(
-                    PosConfig.Category::getPageNumber,
-                    c -> new PosConfig.Page(
-                            c.getPageNumber(),
-                            c.getCols(),
-                            c.getRows(),
-                            buttonsByPage.getOrDefault(c.getPageNumber(), List.of())
-                    ),
-                    (a,b) -> a,
-                    LinkedHashMap::new
-            ));
-
-            return new PosConfig(categories, pages);
+            return new PosConfigSource(categories, pageButtons);
         }
     }
 

@@ -1,9 +1,9 @@
 package com.example.demo.service.port;
 
-import com.example.demo.model.PosConfig;
+import com.example.demo.model.PosConfigSource;
 
 import java.io.InputStream;
 
 public interface PosConfigReader {
-    PosConfig read(InputStream in) throws Exception;
+    PosConfigSource read(InputStream in) throws Exception;
 }

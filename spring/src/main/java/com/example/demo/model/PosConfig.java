@@ -1,5 +1,10 @@
 package com.example.demo.model;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -21,6 +26,36 @@ public class PosConfig {
 
     public Page getPage(int pageNumber) {
         return pagesByPageNumber.get(pageNumber);
+    }
+
+    public static PosConfig fromSource(PosConfigSource source) {
+        List<Category> sortedCategories = new ArrayList<>(source.getCategories());
+        sortedCategories.sort(Comparator.comparingInt(Category::getPageNumber));
+
+        Map<Integer, List<Button>> buttonsByPage = new HashMap<>();
+        for (PosConfigSource.PageButton pageButton : source.getPageButtons()) {
+            buttonsByPage
+                    .computeIfAbsent(pageButton.getPageNumber(), k -> new ArrayList<>())
+                    .add(pageButton.getButton());
+        }
+
+        Map<Integer, Page> pages = new LinkedHashMap<>();
+        for (Category category : sortedCategories) {
+            pages.putIfAbsent(
+                    category.getPageNumber(),
+                    new Page(
+                            category.getPageNumber(),
+                            category.getCols(),
+                            category.getRows(),
+                            List.copyOf(buttonsByPage.getOrDefault(category.getPageNumber(), List.of()))
+                    )
+            );
+        }
+
+        return new PosConfig(
+                List.copyOf(sortedCategories),
+                Collections.unmodifiableMap(new LinkedHashMap<>(pages))
+        );
     }
 
     // ---- Value-like domain classes ----

@@ -4,10 +4,12 @@ import com.example.demo.controller.dto.ImportResponse;
 import com.example.demo.model.PosConfig;
 import com.example.demo.model.PosDraft;
 import com.example.demo.service.ImportPosUseCase;
+import com.example.demo.service.command.ImportPosCommand;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.stream.Collectors;
 
 //エクセルのImportを受け取るコントローラ
@@ -26,10 +28,17 @@ public class PosImportController {
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE
     )
-    public ImportResponse importExcel(@RequestPart("file") MultipartFile file) throws Exception {
+    public ImportResponse importExcel(@RequestPart("file") MultipartFile file) {
         if (file == null || file.isEmpty()) throw new IllegalArgumentException("file is empty");
 
-        PosDraft draft = importUseCase.importExcel(file.getInputStream());
+        ImportPosCommand command;
+        try {
+            command = new ImportPosCommand(file.getBytes());
+        } catch (IOException ex) {
+            throw new IllegalStateException("failed to read uploaded file", ex);
+        }
+
+        PosDraft draft = importUseCase.importExcel(command);
         PosConfig config = draft.getConfig();
 
         ImportResponse res = new ImportResponse();

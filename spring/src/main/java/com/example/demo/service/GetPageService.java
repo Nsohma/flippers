@@ -17,7 +17,9 @@ public class GetPageService implements GetPageUseCase {
 
     @Override
     public PosConfig.Page getPage(String draftId, int pageNumber) {
-        PosDraft draft = draftRepository.load(draftId);
+        PosDraft draft = draftRepository
+                .findById(draftId)
+                .orElseThrow(() -> new NotFoundException("draft not found: " + draftId));
         PosConfig.Page page = draft.getConfig().getPage(pageNumber);
         if (page == null) throw new NotFoundException("page not found: " + pageNumber);
         return page;
