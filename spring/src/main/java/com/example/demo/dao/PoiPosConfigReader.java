@@ -51,7 +51,7 @@ public class PoiPosConfigReader implements PosConfigReader {
                 categories.add(new PosConfig.Category(page, cols, rows, desc, style));
             }
 
-            // PageNumber順（あなたの説明通り）
+            // PageNumber順
             categories.sort(Comparator.comparingInt(PosConfig.Category::getPageNumber));
 
             // PresetMenuButtonMaster: PageNumber, ButtonColumnNumber, ButtonRowNumber, Description, StyleKey, SettingData
