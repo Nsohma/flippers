@@ -37,6 +37,13 @@ const priceDialog = reactive({
   itemCode: "",
   unitPrice: "",
 });
+const categoryDialog = reactive({
+  open: false,
+  name: "",
+  cols: "5",
+  rows: "5",
+  styleKey: "1",
+});
 
 // (col,row) -> button を引けるMapにしておくと描画が楽
 const buttonMap = computed(() => {
@@ -63,6 +70,11 @@ const gridCells = computed(() => {
 const selectedAddCategory = computed(() => {
   if (!addDialog.categoryCode) return null;
   return catalogState.categories.find((c) => c.code === addDialog.categoryCode) ?? null;
+});
+
+const selectedCategory = computed(() => {
+  if (!state.selectedPageNumber) return null;
+  return state.categories.find((c) => c.pageNumber === state.selectedPageNumber) ?? null;
 });
 
 const filteredAddItems = computed(() => {
@@ -113,6 +125,7 @@ async function importExcel() {
     state.selectedPageNumber = state.page?.pageNumber ?? (state.categories[0]?.pageNumber ?? null);
     closeAddDialog();
     closePriceDialog();
+    closeCategoryDialog();
     resetCatalogState();
     void loadItemCatalog();
   } catch (e) {
@@ -134,6 +147,7 @@ async function loadPage(pageNumber) {
     state.selectedPageNumber = pageNumber;
     closeAddDialog();
     closePriceDialog();
+    closeCategoryDialog();
   } catch (e) {
     state.error = String(e);
   } finally {
@@ -245,11 +259,107 @@ function closePriceDialog() {
   priceDialog.unitPrice = "";
 }
 
+function closeCategoryDialog() {
+  categoryDialog.open = false;
+  categoryDialog.name = "";
+}
+
+function openCategoryDialog() {
+  if (state.loading || !state.draftId) return;
+  closeAddDialog();
+  closePriceDialog();
+
+  const base = selectedCategory.value ?? state.categories[0] ?? null;
+  categoryDialog.name = "";
+  categoryDialog.cols = String(base?.cols ?? 5);
+  categoryDialog.rows = String(base?.rows ?? 5);
+  categoryDialog.styleKey = String(base?.styleKey ?? 1);
+  categoryDialog.open = true;
+}
+
+async function submitAddCategory() {
+  if (state.loading || !state.draftId) return;
+  if (!categoryDialog.open) return;
+
+  const name = String(categoryDialog.name ?? "").trim();
+  if (!name) {
+    state.error = "カテゴリ名を入力してください";
+    return;
+  }
+
+  const cols = Number.parseInt(String(categoryDialog.cols ?? "").trim(), 10);
+  const rows = Number.parseInt(String(categoryDialog.rows ?? "").trim(), 10);
+  const styleKey = Number.parseInt(String(categoryDialog.styleKey ?? "").trim(), 10);
+  if (!Number.isInteger(cols) || cols <= 0) {
+    state.error = "列数は1以上の整数で入力してください";
+    return;
+  }
+  if (!Number.isInteger(rows) || rows <= 0) {
+    state.error = "行数は1以上の整数で入力してください";
+    return;
+  }
+  if (!Number.isInteger(styleKey) || styleKey <= 0) {
+    state.error = "styleKeyは1以上の整数で入力してください";
+    return;
+  }
+
+  state.error = "";
+  state.loading = true;
+  try {
+    const res = await fetch(`${API_BASE}/drafts/${state.draftId}/categories`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, cols, rows, styleKey }),
+    });
+    if (!res.ok) {
+      throw new Error(await readApiError(res, `Add category failed: ${res.status}`));
+    }
+    const data = await res.json();
+    state.categories = data.categories ?? [];
+    state.page = data.page ?? null;
+    state.selectedPageNumber = state.page?.pageNumber ?? (state.categories[0]?.pageNumber ?? null);
+    closeCategoryDialog();
+  } catch (e) {
+    state.error = String(e);
+  } finally {
+    state.loading = false;
+  }
+}
+
+async function deleteSelectedCategory() {
+  if (state.loading || !state.draftId) return;
+  const pageNumber = state.selectedPageNumber;
+  if (!pageNumber) return;
+
+  state.error = "";
+  state.loading = true;
+  try {
+    const res = await fetch(`${API_BASE}/drafts/${state.draftId}/categories/${pageNumber}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) {
+      throw new Error(await readApiError(res, `Delete category failed: ${res.status}`));
+    }
+    const data = await res.json();
+    state.categories = data.categories ?? [];
+    state.page = data.page ?? null;
+    state.selectedPageNumber = state.page?.pageNumber ?? (state.categories[0]?.pageNumber ?? null);
+    closeCategoryDialog();
+    closeAddDialog();
+    closePriceDialog();
+  } catch (e) {
+    state.error = String(e);
+  } finally {
+    state.loading = false;
+  }
+}
+
 function openPriceDialog(button) {
   if (state.loading) return;
   if (!button?.buttonId) return;
 
   closeAddDialog();
+  closeCategoryDialog();
   state.error = "";
   priceDialog.buttonId = button.buttonId;
   priceDialog.label = button.label ?? "";
@@ -305,6 +415,7 @@ async function openAddDialog(cell) {
   if (!state.draftId || !state.page) return;
 
   closePriceDialog();
+  closeCategoryDialog();
   state.error = "";
   const ready = await ensureItemCatalogLoaded();
   if (!ready) {
@@ -494,8 +605,8 @@ function onButtonDragEnd() {
       <div class="error" v-if="state.error">{{ state.error }}</div>
     </section>
 
-    <section class="panel" v-if="state.categories.length">
-      <div class="tabs">
+    <section class="panel" v-if="state.draftId">
+      <div class="tabs tabs-row">
         <button
           v-for="c in state.categories"
           :key="c.pageNumber"
@@ -505,6 +616,18 @@ function onButtonDragEnd() {
         >
           {{ c.name }}
         </button>
+        <div class="category-actions">
+          <button class="category-add-btn" :disabled="state.loading" @click="openCategoryDialog">
+            + カテゴリ追加
+          </button>
+          <button
+            class="category-delete-btn"
+            :disabled="state.loading || !state.selectedPageNumber"
+            @click="deleteSelectedCategory"
+          >
+            × 選択カテゴリ削除
+          </button>
+        </div>
       </div>
     </section>
 
@@ -662,6 +785,48 @@ function onButtonDragEnd() {
         </div>
       </div>
     </div>
+
+    <div v-if="categoryDialog.open" class="modal-backdrop" @click="closeCategoryDialog">
+      <div class="price-modal" @click.stop>
+        <div class="add-modal-head">
+          <h2>カテゴリ追加</h2>
+          <button class="close-btn" type="button" @click="closeCategoryDialog">×</button>
+        </div>
+
+        <label class="field-label" for="category-name-input">カテゴリ名</label>
+        <input
+          id="category-name-input"
+          v-model="categoryDialog.name"
+          class="item-search"
+          type="text"
+          placeholder="例: 新カテゴリ"
+        />
+
+        <div class="category-grid-form">
+          <label class="field-label">
+            列数
+            <input v-model="categoryDialog.cols" class="item-search" type="number" min="1" />
+          </label>
+          <label class="field-label">
+            行数
+            <input v-model="categoryDialog.rows" class="item-search" type="number" min="1" />
+          </label>
+          <label class="field-label">
+            styleKey
+            <input v-model="categoryDialog.styleKey" class="item-search" type="number" min="1" />
+          </label>
+        </div>
+
+        <div class="price-actions">
+          <button class="price-cancel" type="button" :disabled="state.loading" @click="closeCategoryDialog">
+            キャンセル
+          </button>
+          <button class="price-save" type="button" :disabled="state.loading" @click="submitAddCategory">
+            追加する
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -669,8 +834,22 @@ function onButtonDragEnd() {
 .wrap { max-width: 1100px; margin: 24px auto; padding: 0 16px; font-family: system-ui, -apple-system, sans-serif; }
 .panel { background: #fff; border: 1px solid #eee; border-radius: 12px; padding: 12px; margin: 12px 0; }
 .tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.tabs-row { align-items: center; justify-content: space-between; }
 .tab { padding: 8px 10px; border-radius: 999px; border: 1px solid #ddd; background: #fafafa; cursor: pointer; }
 .tab.active { border-color: #999; background: #f0f0f0; font-weight: 700; }
+.category-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.category-add-btn,
+.category-delete-btn {
+  border: 1px solid #ccc;
+  border-radius: 999px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.category-add-btn { background: #f3fbf4; border-color: #95d3a0; color: #165e25; }
+.category-delete-btn { background: #fff3f3; border-color: #e2a3a3; color: #8c2020; }
+.category-add-btn:disabled,
+.category-delete-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .grid { display: grid; gap: 8px; margin-top: 12px; }
 .cell { background: #fafafa; border: 1px dashed #e3e3e3; border-radius: 10px; padding: 6px; display: flex; align-items: stretch; justify-content: stretch; position: relative; }
 .empty { width: 100%; height: 100%; }
@@ -844,6 +1023,8 @@ function onButtonDragEnd() {
   white-space: nowrap;
 }
 .item-empty { color: #666; font-size: 13px; padding: 8px 4px; }
+.category-grid-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.category-grid-form .field-label { display: grid; gap: 4px; }
 .price-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
 .price-cancel,
 .price-save {
@@ -866,4 +1047,10 @@ function onButtonDragEnd() {
 .error { color: #b00020; margin-top: 8px; white-space: pre-wrap; }
 .meta { margin-top: 8px; font-size: 13px; }
 .page-title { margin-bottom: 8px; }
+
+@media (max-width: 680px) {
+  .tabs-row { justify-content: flex-start; }
+  .category-actions { margin-left: 0; width: 100%; flex-wrap: wrap; }
+  .category-grid-form { grid-template-columns: 1fr; }
+}
 </style>

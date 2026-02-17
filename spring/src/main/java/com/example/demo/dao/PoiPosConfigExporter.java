@@ -23,15 +23,18 @@ import java.util.Map;
 @Component
 public class PoiPosConfigExporter implements PosConfigExporter {
     private static final String SHEET_BUTTON = "PresetMenuButtonMaster";
+    private static final String SHEET_MENU = "PresetMenuMaster";
     private static final String SHEET_ITEM = "ItemMaster";
 
     @Override
     public byte[] export(byte[] originalExcelBytes, PosConfig config) throws Exception {
         try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(originalExcelBytes))) {
             Sheet btn = requireSheet(wb, SHEET_BUTTON);
+            Sheet menu = requireSheet(wb, SHEET_MENU);
             Sheet item = requireSheet(wb, SHEET_ITEM);
             ExcelUtil u = new ExcelUtil(wb);
             HeaderMap btnHm = HeaderMap.from(btn, u, "PageNumber");
+            HeaderMap menuHm = HeaderMap.from(menu, u, "PageNumber");
             HeaderMap itemHm = HeaderMap.from(item, u, "ItemCode", "UnitPrice");
 
             int bPage = btnHm.require("PageNumber");
@@ -40,10 +43,31 @@ public class PoiPosConfigExporter implements PosConfigExporter {
             int bDesc = btnHm.require("Description");
             int bStyle = btnHm.require("StyleKey");
             int bSet = btnHm.require("SettingData");
+            int mPage = menuHm.require("PageNumber");
+            int mCols = menuHm.require("ButtonColumnCount");
+            int mRows = menuHm.require("ButtonRowCount");
+            int mDesc = menuHm.require("Description");
+            int mStyle = menuHm.require("StyleKey");
             int iCode = itemHm.require("ItemCode");
             int iUnitPrice = itemHm.require("UnitPrice");
 
             List<IndexedButton> sortedButtons = collectAndSortButtons(config);
+            List<PosConfig.Category> sortedCategories = collectAndSortCategories(config);
+
+            for (int r = menuHm.dataStartRow; r <= menu.getLastRowNum(); r++) {
+                Row row = menu.getRow(r);
+                if (row == null) continue;
+                clearMenuRow(row, mPage, mCols, mRows, mDesc, mStyle);
+            }
+            int writeMenuRowIndex = menuHm.dataStartRow;
+            for (PosConfig.Category category : sortedCategories) {
+                Row row = menu.getRow(writeMenuRowIndex);
+                if (row == null) {
+                    row = menu.createRow(writeMenuRowIndex);
+                }
+                writeMenuRow(row, mPage, mCols, mRows, mDesc, mStyle, category);
+                writeMenuRowIndex++;
+            }
 
             for (int r = btnHm.dataStartRow; r <= btn.getLastRowNum(); r++) {
                 Row row = btn.getRow(r);
@@ -116,6 +140,43 @@ public class PoiPosConfigExporter implements PosConfigExporter {
             }
         }
         return map;
+    }
+
+    private static List<PosConfig.Category> collectAndSortCategories(PosConfig config) {
+        List<PosConfig.Category> list = new ArrayList<>(config.getCategories());
+        list.sort(Comparator.comparingInt(PosConfig.Category::getPageNumber));
+        return list;
+    }
+
+    private static void writeMenuRow(
+            Row row,
+            int mPage,
+            int mCols,
+            int mRows,
+            int mDesc,
+            int mStyle,
+            PosConfig.Category category
+    ) {
+        setInt(row, mPage, category.getPageNumber());
+        setInt(row, mCols, category.getCols());
+        setInt(row, mRows, category.getRows());
+        setString(row, mDesc, category.getName());
+        setInt(row, mStyle, category.getStyleKey());
+    }
+
+    private static void clearMenuRow(
+            Row row,
+            int mPage,
+            int mCols,
+            int mRows,
+            int mDesc,
+            int mStyle
+    ) {
+        clearCell(row, mPage);
+        clearCell(row, mCols);
+        clearCell(row, mRows);
+        clearCell(row, mDesc);
+        clearCell(row, mStyle);
     }
 
     private static void clearButtonRow(

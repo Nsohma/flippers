@@ -141,6 +141,46 @@ public class GetPageService implements GetPageUseCase {
         return updatedConfig.getPage(pageNumber);
     }
 
+    @Override
+    public PosConfig addCategory(String draftId, String name, int cols, int rows, int styleKey) {
+        PosDraft draft = draftRepository
+                .findById(draftId)
+                .orElseThrow(() -> new NotFoundException("draft not found: " + draftId));
+
+        int resolvedCols = cols;
+        int resolvedRows = rows;
+        int resolvedStyleKey = styleKey;
+        PosConfig.Category defaultCategory = draft.getConfig().firstCategoryOrNull();
+        if (resolvedCols <= 0 && defaultCategory != null) {
+            resolvedCols = defaultCategory.getCols();
+        }
+        if (resolvedRows <= 0 && defaultCategory != null) {
+            resolvedRows = defaultCategory.getRows();
+        }
+        if (resolvedStyleKey <= 0 && defaultCategory != null) {
+            resolvedStyleKey = defaultCategory.getStyleKey();
+        }
+        if (resolvedCols <= 0) resolvedCols = 5;
+        if (resolvedRows <= 0) resolvedRows = 5;
+        if (resolvedStyleKey <= 0) resolvedStyleKey = 1;
+
+        PosConfig updatedConfig = draft.getConfig().addCategory(name, resolvedCols, resolvedRows, resolvedStyleKey);
+        PosDraft updatedDraft = new PosDraft(draftId, updatedConfig, draft.getOriginalExcelBytes());
+        draftRepository.save(updatedDraft);
+        return updatedConfig;
+    }
+
+    @Override
+    public PosConfig deleteCategory(String draftId, int pageNumber) {
+        PosDraft draft = draftRepository
+                .findById(draftId)
+                .orElseThrow(() -> new NotFoundException("draft not found: " + draftId));
+        PosConfig updatedConfig = draft.getConfig().deleteCategory(pageNumber);
+        PosDraft updatedDraft = new PosDraft(draftId, updatedConfig, draft.getOriginalExcelBytes());
+        draftRepository.save(updatedDraft);
+        return updatedConfig;
+    }
+
     private ItemCatalog loadItemCatalog(PosDraft draft) {
         try (ByteArrayInputStream in = new ByteArrayInputStream(draft.getOriginalExcelBytes())) {
             PosConfigSource source = reader.read(in);

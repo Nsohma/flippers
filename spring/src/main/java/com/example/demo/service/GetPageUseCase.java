@@ -17,4 +17,6 @@ public interface GetPageUseCase {
     );
     PosConfig.Page deleteButton(String draftId, int pageNumber, String buttonId);
     PosConfig.Page updateUnitPrice(String draftId, int pageNumber, String buttonId, String unitPrice);
+    PosConfig addCategory(String draftId, String name, int cols, int rows, int styleKey);
+    PosConfig deleteCategory(String draftId, int pageNumber);
 }

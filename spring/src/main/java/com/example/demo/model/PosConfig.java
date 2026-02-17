@@ -131,6 +131,59 @@ public class PosConfig implements Serializable {
         return new PosConfig(categories, Collections.unmodifiableMap(updatedPages));
     }
 
+    public PosConfig addCategory(String name, int cols, int rows, int styleKey) {
+        String normalizedName = name == null ? "" : name.trim();
+        if (normalizedName.isEmpty()) {
+            throw new IllegalArgumentException("category name is required");
+        }
+        if (cols <= 0) {
+            throw new IllegalArgumentException("cols must be positive");
+        }
+        if (rows <= 0) {
+            throw new IllegalArgumentException("rows must be positive");
+        }
+
+        int nextPageNumber = 1;
+        for (Category category : categories) {
+            if (category.getPageNumber() >= nextPageNumber) {
+                nextPageNumber = category.getPageNumber() + 1;
+            }
+        }
+
+        List<Category> updatedCategories = new ArrayList<>(categories);
+        updatedCategories.add(new Category(nextPageNumber, cols, rows, normalizedName, styleKey));
+        updatedCategories.sort(Comparator.comparingInt(Category::getPageNumber));
+
+        Map<Integer, Page> updatedPages = new LinkedHashMap<>(pagesByPageNumber);
+        updatedPages.put(nextPageNumber, new Page(nextPageNumber, cols, rows, List.of()));
+        return new PosConfig(
+                List.copyOf(updatedCategories),
+                Collections.unmodifiableMap(updatedPages)
+        );
+    }
+
+    public PosConfig deleteCategory(int pageNumber) {
+        boolean exists = false;
+        List<Category> updatedCategories = new ArrayList<>();
+        for (Category category : categories) {
+            if (category.getPageNumber() == pageNumber) {
+                exists = true;
+                continue;
+            }
+            updatedCategories.add(category);
+        }
+        if (!exists) {
+            throw new IllegalArgumentException("category(page) not found: " + pageNumber);
+        }
+
+        Map<Integer, Page> updatedPages = new LinkedHashMap<>(pagesByPageNumber);
+        updatedPages.remove(pageNumber);
+        return new PosConfig(
+                List.copyOf(updatedCategories),
+                Collections.unmodifiableMap(updatedPages)
+        );
+    }
+
     private boolean hasButtonId(String buttonId) {
         for (Page page : pagesByPageNumber.values()) {
             for (Button button : page.getButtons()) {

@@ -1,6 +1,8 @@
 package com.example.demo.controller;
 
 import com.example.demo.controller.dto.AddButtonRequest;
+import com.example.demo.controller.dto.AddCategoryRequest;
+import com.example.demo.controller.dto.CategoryStateResponse;
 import com.example.demo.controller.dto.DeleteButtonRequest;
 import com.example.demo.controller.dto.ItemCatalogResponse;
 import com.example.demo.controller.dto.PageResponse;
@@ -117,6 +119,39 @@ public class PosDraftController {
         return toPageResponse(page);
     }
 
+    @PostMapping("/{draftId}/categories")
+    public CategoryStateResponse addCategory(
+            @PathVariable String draftId,
+            @RequestBody AddCategoryRequest req
+    ) {
+        if (req == null) {
+            throw new IllegalArgumentException("request body is required");
+        }
+        PosConfig updatedConfig = getPageUseCase.addCategory(
+                draftId,
+                req.name,
+                req.cols,
+                req.rows,
+                req.styleKey
+        );
+        int selectedPageNumber = updatedConfig.getCategories().stream()
+                .mapToInt(PosConfig.Category::getPageNumber)
+                .max()
+                .orElseThrow();
+        return toCategoryStateResponse(updatedConfig, selectedPageNumber);
+    }
+
+    @DeleteMapping("/{draftId}/categories/{pageNumber}")
+    public CategoryStateResponse deleteCategory(
+            @PathVariable String draftId,
+            @PathVariable int pageNumber
+    ) {
+        PosConfig updatedConfig = getPageUseCase.deleteCategory(draftId, pageNumber);
+        PosConfig.Category selected = updatedConfig.firstCategoryOrNull();
+        int selectedPageNumber = selected == null ? -1 : selected.getPageNumber();
+        return toCategoryStateResponse(updatedConfig, selectedPageNumber);
+    }
+
     @GetMapping(
             value = "/{draftId}/export",
             produces = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -170,6 +205,26 @@ public class PosDraftController {
             }).collect(Collectors.toList());
             return dto;
         }).collect(Collectors.toList());
+        return response;
+    }
+
+    private static CategoryStateResponse toCategoryStateResponse(PosConfig config, int selectedPageNumber) {
+        CategoryStateResponse response = new CategoryStateResponse();
+        response.categories = config.getCategories().stream().map(category -> {
+            CategoryStateResponse.CategoryDto dto = new CategoryStateResponse.CategoryDto();
+            dto.pageNumber = category.getPageNumber();
+            dto.cols = category.getCols();
+            dto.rows = category.getRows();
+            dto.name = category.getName();
+            dto.styleKey = category.getStyleKey();
+            return dto;
+        }).collect(Collectors.toList());
+        if (selectedPageNumber > 0) {
+            PosConfig.Page page = config.getPage(selectedPageNumber);
+            response.page = page == null ? null : toPageResponse(page);
+        } else {
+            response.page = null;
+        }
         return response;
     }
 }

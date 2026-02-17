@@ -177,6 +177,57 @@ class PosAddButtonExportTest {
         );
     }
 
+    @Test
+    void export_adds_category_row_to_preset_menu_master() throws Exception {
+        byte[] originalBytes = Files.readAllBytes(ORIGINAL);
+
+        PoiPosConfigReader reader = new PoiPosConfigReader();
+        PosConfigSource source = reader.read(new ByteArrayInputStream(originalBytes));
+        PosConfig config = PosConfig.fromSource(source);
+
+        String categoryName = "TEST_CATEGORY_ADD";
+        PosConfig updated = config.addCategory(categoryName, 6, 4, 3);
+        int addedPageNumber = updated.getCategories().stream()
+                .mapToInt(PosConfig.Category::getPageNumber)
+                .max()
+                .orElseThrow();
+
+        PoiPosConfigExporter exporter = new PoiPosConfigExporter();
+        byte[] exported = exporter.export(originalBytes, updated);
+
+        assertTrue(
+                existsMenuRow(exported, addedPageNumber, 6, 4, categoryName, 3),
+                "added category row was not written to PresetMenuMaster"
+        );
+    }
+
+    @Test
+    void export_deletes_category_row_from_preset_menu_master() throws Exception {
+        byte[] originalBytes = Files.readAllBytes(ORIGINAL);
+
+        PoiPosConfigReader reader = new PoiPosConfigReader();
+        PosConfigSource source = reader.read(new ByteArrayInputStream(originalBytes));
+        PosConfig config = PosConfig.fromSource(source);
+
+        PosConfig.Category targetCategory = config.getCategories().get(0);
+        PosConfig updated = config.deleteCategory(targetCategory.getPageNumber());
+
+        PoiPosConfigExporter exporter = new PoiPosConfigExporter();
+        byte[] exported = exporter.export(originalBytes, updated);
+
+        assertFalse(
+                existsMenuRow(
+                        exported,
+                        targetCategory.getPageNumber(),
+                        targetCategory.getCols(),
+                        targetCategory.getRows(),
+                        targetCategory.getName(),
+                        targetCategory.getStyleKey()
+                ),
+                "deleted category row still exists in PresetMenuMaster"
+        );
+    }
+
     private static TargetCell findFirstEmptyCell(PosConfig config) {
         for (PosConfig.Category category : config.getCategories()) {
             PosConfig.Page page = config.getPage(category.getPageNumber());
@@ -423,6 +474,49 @@ class PosAddButtonExportTest {
             return trimmed.substring(0, trimmed.length() - 2);
         }
         return trimmed;
+    }
+
+    private static boolean existsMenuRow(
+            byte[] bytes,
+            int pageNumber,
+            int cols,
+            int rows,
+            String description,
+            int styleKey
+    ) throws Exception {
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            Sheet sheet = wb.getSheet("PresetMenuMaster");
+            if (sheet == null) return false;
+
+            DataFormatter formatter = new DataFormatter();
+            int headerRowIndex = findHeaderRowIndex(sheet, formatter, "PageNumber");
+            if (headerRowIndex < 0) return false;
+            Row headerRow = sheet.getRow(headerRowIndex);
+            if (headerRow == null) return false;
+
+            Map<String, Integer> headerIndex = toHeaderIndexMap(headerRow, formatter);
+            int hPage = requireColumn(headerIndex, "PageNumber");
+            int hCols = requireColumn(headerIndex, "ButtonColumnCount");
+            int hRows = requireColumn(headerIndex, "ButtonRowCount");
+            int hDesc = requireColumn(headerIndex, "Description");
+            int hStyle = requireColumn(headerIndex, "StyleKey");
+
+            for (int r = headerRowIndex + 1; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+                String p = formatter.formatCellValue(row.getCell(hPage)).trim();
+                if (p.isEmpty()) continue;
+                int page = toInt(p);
+                int c = toInt(formatter.formatCellValue(row.getCell(hCols)).trim());
+                int rr = toInt(formatter.formatCellValue(row.getCell(hRows)).trim());
+                String d = formatter.formatCellValue(row.getCell(hDesc)).trim();
+                int s = toInt(formatter.formatCellValue(row.getCell(hStyle)).trim());
+                if (page == pageNumber && c == cols && rr == rows && d.equals(description) && s == styleKey) {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
     private record TargetCell(int pageNumber, int col, int row) {
