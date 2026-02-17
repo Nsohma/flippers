@@ -8,6 +8,7 @@ import com.example.demo.controller.dto.DraftHistoryResponse;
 import com.example.demo.controller.dto.ItemCatalogResponse;
 import com.example.demo.controller.dto.PageResponse;
 import com.example.demo.controller.dto.SwapButtonsRequest;
+import com.example.demo.controller.dto.SwapCategoriesRequest;
 import com.example.demo.controller.dto.UpdateCategoryGridRequest;
 import com.example.demo.controller.dto.UpdateUnitPriceRequest;
 import com.example.demo.model.ItemCatalog;
@@ -15,6 +16,7 @@ import com.example.demo.model.PosConfig;
 import com.example.demo.model.PosDraft;
 import com.example.demo.service.AddButtonUseCase;
 import com.example.demo.service.AddCategoryUseCase;
+import com.example.demo.service.ClearDraftHistoryUseCase;
 import com.example.demo.service.DeleteButtonUseCase;
 import com.example.demo.service.DeleteCategoryUseCase;
 import com.example.demo.service.ExportPosUseCase;
@@ -24,6 +26,7 @@ import com.example.demo.service.GetItemCatalogUseCase;
 import com.example.demo.service.JumpDraftHistoryUseCase;
 import com.example.demo.service.RedoDraftUseCase;
 import com.example.demo.service.SwapButtonsUseCase;
+import com.example.demo.service.SwapCategoriesUseCase;
 import com.example.demo.service.UndoDraftUseCase;
 import com.example.demo.service.UpdateUnitPriceUseCase;
 import com.example.demo.service.UpdateCategoryGridUseCase;
@@ -42,6 +45,7 @@ public class PosDraftController {
     private final GetPageUseCase getPageUseCase;
     private final GetDraftHistoryUseCase getDraftHistoryUseCase;
     private final JumpDraftHistoryUseCase jumpDraftHistoryUseCase;
+    private final ClearDraftHistoryUseCase clearDraftHistoryUseCase;
     private final SwapButtonsUseCase swapButtonsUseCase;
     private final GetItemCatalogUseCase getItemCatalogUseCase;
     private final AddButtonUseCase addButtonUseCase;
@@ -49,6 +53,7 @@ public class PosDraftController {
     private final UpdateUnitPriceUseCase updateUnitPriceUseCase;
     private final AddCategoryUseCase addCategoryUseCase;
     private final DeleteCategoryUseCase deleteCategoryUseCase;
+    private final SwapCategoriesUseCase swapCategoriesUseCase;
     private final UpdateCategoryGridUseCase updateCategoryGridUseCase;
     private final UndoDraftUseCase undoDraftUseCase;
     private final RedoDraftUseCase redoDraftUseCase;
@@ -58,6 +63,7 @@ public class PosDraftController {
             GetPageUseCase getPageUseCase,
             GetDraftHistoryUseCase getDraftHistoryUseCase,
             JumpDraftHistoryUseCase jumpDraftHistoryUseCase,
+            ClearDraftHistoryUseCase clearDraftHistoryUseCase,
             SwapButtonsUseCase swapButtonsUseCase,
             GetItemCatalogUseCase getItemCatalogUseCase,
             AddButtonUseCase addButtonUseCase,
@@ -65,6 +71,7 @@ public class PosDraftController {
             UpdateUnitPriceUseCase updateUnitPriceUseCase,
             AddCategoryUseCase addCategoryUseCase,
             DeleteCategoryUseCase deleteCategoryUseCase,
+            SwapCategoriesUseCase swapCategoriesUseCase,
             UpdateCategoryGridUseCase updateCategoryGridUseCase,
             UndoDraftUseCase undoDraftUseCase,
             RedoDraftUseCase redoDraftUseCase,
@@ -73,6 +80,7 @@ public class PosDraftController {
         this.getPageUseCase = getPageUseCase;
         this.getDraftHistoryUseCase = getDraftHistoryUseCase;
         this.jumpDraftHistoryUseCase = jumpDraftHistoryUseCase;
+        this.clearDraftHistoryUseCase = clearDraftHistoryUseCase;
         this.swapButtonsUseCase = swapButtonsUseCase;
         this.getItemCatalogUseCase = getItemCatalogUseCase;
         this.addButtonUseCase = addButtonUseCase;
@@ -80,6 +88,7 @@ public class PosDraftController {
         this.updateUnitPriceUseCase = updateUnitPriceUseCase;
         this.addCategoryUseCase = addCategoryUseCase;
         this.deleteCategoryUseCase = deleteCategoryUseCase;
+        this.swapCategoriesUseCase = swapCategoriesUseCase;
         this.updateCategoryGridUseCase = updateCategoryGridUseCase;
         this.undoDraftUseCase = undoDraftUseCase;
         this.redoDraftUseCase = redoDraftUseCase;
@@ -107,6 +116,12 @@ public class PosDraftController {
         PosDraft updatedDraft = jumpDraftHistoryUseCase.jumpTo(draftId, index);
         int resolvedSelectedPageNumber = resolveSelectedPageNumber(updatedDraft.getConfig(), selectedPageNumber);
         return toCategoryStateResponse(updatedDraft, resolvedSelectedPageNumber);
+    }
+
+    @DeleteMapping("/{draftId}/history")
+    public DraftHistoryResponse clearHistory(@PathVariable String draftId) {
+        PosDraft updatedDraft = clearDraftHistoryUseCase.clear(draftId);
+        return toDraftHistoryResponse(updatedDraft);
     }
 
     @PatchMapping("/{draftId}/pages/{pageNumber}/buttons/swap")
@@ -215,12 +230,30 @@ public class PosDraftController {
     @DeleteMapping("/{draftId}/categories/{pageNumber}")
     public CategoryStateResponse deleteCategory(
             @PathVariable String draftId,
-            @PathVariable int pageNumber
+            @PathVariable int pageNumber,
+            @RequestParam(name = "selectedPageNumber", required = false) Integer selectedPageNumber
     ) {
         PosConfig updatedConfig = deleteCategoryUseCase.deleteCategory(draftId, pageNumber);
-        PosConfig.Category selected = updatedConfig.firstCategoryOrNull();
-        int selectedPageNumber = selected == null ? -1 : selected.getPageNumber();
-        return toCategoryStateResponse(updatedConfig, selectedPageNumber);
+        int resolvedSelectedPageNumber = resolveSelectedPageNumber(updatedConfig, selectedPageNumber);
+        return toCategoryStateResponse(updatedConfig, resolvedSelectedPageNumber);
+    }
+
+    @PatchMapping("/{draftId}/categories/swap")
+    public CategoryStateResponse swapCategories(
+            @PathVariable String draftId,
+            @RequestBody SwapCategoriesRequest req,
+            @RequestParam(name = "selectedPageNumber", required = false) Integer selectedPageNumber
+    ) {
+        if (req == null) {
+            throw new IllegalArgumentException("request body is required");
+        }
+        PosDraft updatedDraft = swapCategoriesUseCase.swapCategories(
+                draftId,
+                req.fromPageNumber,
+                req.toPageNumber
+        );
+        int resolvedSelectedPageNumber = resolveSelectedPageNumber(updatedDraft.getConfig(), selectedPageNumber);
+        return toCategoryStateResponse(updatedDraft, resolvedSelectedPageNumber);
     }
 
     @PatchMapping("/{draftId}/categories/{pageNumber}/grid")

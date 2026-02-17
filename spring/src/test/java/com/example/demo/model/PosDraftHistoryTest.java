@@ -2,6 +2,10 @@ package com.example.demo.model;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -80,6 +84,78 @@ class PosDraftHistoryTest {
         assertTrue(jumped.canUndo());
         assertTrue(jumped.canRedo());
         assertEquals(1, jumped.getHistoryIndex());
+    }
+
+    @Test
+    void clear_history_resets_entries_at_current_state() {
+        PosConfig initial = configWithLabel("A");
+        PosConfig second = configWithLabel("B");
+        PosConfig third = configWithLabel("C");
+
+        PosDraft draft = new PosDraft("dft_test", initial, new byte[]{1})
+                .applyNewConfig(second, "追加")
+                .applyNewConfig(third, "削除")
+                .jumpToHistoryIndex(1);
+
+        PosDraft cleared = draft.clearHistory();
+
+        assertEquals("B", labelOf(cleared.getConfig()));
+        assertEquals(1, cleared.getHistoryEntries().size());
+        assertEquals("履歴削除", cleared.getHistoryEntries().get(0).getAction());
+        assertEquals(0, cleared.getHistoryIndex());
+        assertFalse(cleared.canUndo());
+        assertFalse(cleared.canRedo());
+    }
+
+    @Test
+    void serialization_roundtrip_preserves_diff_history() throws Exception {
+        PosConfig initial = configWithLabel("A");
+        PosConfig second = configWithLabel("B");
+        PosConfig third = configWithLabel("C");
+
+        PosDraft draft = new PosDraft("dft_test", initial, new byte[]{1})
+                .applyNewConfig(second, "追加")
+                .applyNewConfig(third, "削除");
+        assertTrue(draft.canUndo());
+        assertEquals(2, draft.getHistoryIndex());
+        assertEquals(3, draft.getHistoryEntries().size());
+
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        try (ObjectOutputStream out = new ObjectOutputStream(buffer)) {
+            out.writeObject(draft);
+        }
+
+        PosDraft restored;
+        try (ObjectInputStream in = new ObjectInputStream(new ByteArrayInputStream(buffer.toByteArray()))) {
+            restored = (PosDraft) in.readObject();
+        }
+
+        assertTrue(restored.canUndo());
+        assertFalse(restored.canRedo());
+        assertEquals(2, restored.getHistoryIndex());
+        assertEquals(3, restored.getHistoryEntries().size());
+        assertEquals("C", labelOf(restored.getConfig()));
+
+        PosDraft undone = restored.undo();
+        assertEquals("B", labelOf(undone.getConfig()));
+        assertEquals(1, undone.getHistoryIndex());
+    }
+
+    @Test
+    void swap_change_undo_restores_when_target_cell_was_empty() {
+        PosConfig.Category category = new PosConfig.Category(1, 2, 1, "PAGE", 1);
+        PosConfig.Button button = new PosConfig.Button(1, 1, "A", 1, "ITEM01", "100", "BTN01");
+        PosConfig.Page page = new PosConfig.Page(1, 2, 1, List.of(button));
+        Map<Integer, PosConfig.Page> pages = new LinkedHashMap<>();
+        pages.put(1, page);
+
+        PosDraft draft = new PosDraft("dft_test", new PosConfig(List.of(category), pages), new byte[]{1});
+        PosDraft swapped = draft.applyChange(new PosDraft.SwapButtonsChange(1, 1, 1, 2, 1), "ボタン入れ替え");
+        PosDraft undone = swapped.undo();
+
+        PosConfig.Button restored = undone.getConfig().getPage(1).getButtons().get(0);
+        assertEquals(1, restored.getCol());
+        assertEquals(1, restored.getRow());
     }
 
     private static PosConfig configWithLabel(String label) {

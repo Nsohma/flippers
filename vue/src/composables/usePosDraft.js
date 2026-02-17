@@ -401,19 +401,71 @@ export function usePosDraft(rawApiBase) {
     }
   }
 
-  async function deleteSelectedCategory() {
+  async function deleteCategoryByPage(pageNumber) {
     if (state.loading || !state.draftId) return;
-    const pageNumber = state.selectedPageNumber;
-    if (!pageNumber) return;
+    if (!Number.isInteger(pageNumber) || pageNumber <= 0) return;
 
     state.error = "";
     state.loading = true;
     try {
-      const res = await fetch(`${API_BASE}/drafts/${state.draftId}/categories/${pageNumber}`, {
+      const preferredSelected =
+        state.selectedPageNumber === pageNumber ? null : state.selectedPageNumber;
+      const query =
+        Number.isInteger(preferredSelected) && preferredSelected > 0
+          ? `?selectedPageNumber=${preferredSelected}`
+          : "";
+      const res = await fetch(`${API_BASE}/drafts/${state.draftId}/categories/${pageNumber}${query}`, {
         method: "DELETE",
       });
       if (!res.ok) {
         throw new Error(await readApiError(res, `Delete category failed: ${res.status}`));
+      }
+
+      const data = await res.json();
+      applyCategoryState(data);
+      applyHistoryFlags(data, true, false);
+      closeAllDialogs();
+      await loadHistory(true);
+    } catch (error) {
+      state.error = String(error);
+    } finally {
+      state.loading = false;
+    }
+  }
+
+  async function deleteSelectedCategory() {
+    const pageNumber = state.selectedPageNumber;
+    if (!Number.isInteger(pageNumber) || pageNumber <= 0) return;
+    await deleteCategoryByPage(pageNumber);
+  }
+
+  async function swapCategories(fromPageNumber, toPageNumber) {
+    if (state.loading || !state.draftId) return;
+    if (!Number.isInteger(fromPageNumber) || !Number.isInteger(toPageNumber)) return;
+    if (fromPageNumber === toPageNumber) return;
+
+    const currentSelected = state.selectedPageNumber;
+    const nextSelected =
+      currentSelected === fromPageNumber
+        ? toPageNumber
+        : currentSelected === toPageNumber
+          ? fromPageNumber
+          : currentSelected;
+
+    state.error = "";
+    state.loading = true;
+    try {
+      const query =
+        Number.isInteger(nextSelected) && nextSelected > 0
+          ? `?selectedPageNumber=${nextSelected}`
+          : "";
+      const res = await fetch(`${API_BASE}/drafts/${state.draftId}/categories/swap${query}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromPageNumber, toPageNumber }),
+      });
+      if (!res.ok) {
+        throw new Error(await readApiError(res, `Swap categories failed: ${res.status}`));
       }
 
       const data = await res.json();
@@ -751,6 +803,29 @@ export function usePosDraft(rawApiBase) {
     }
   }
 
+  async function clearHistory() {
+    if (state.loading || !state.draftId) return;
+    if (!Array.isArray(state.historyEntries) || state.historyEntries.length <= 1) return;
+
+    state.error = "";
+    state.loading = true;
+    try {
+      const res = await fetch(`${API_BASE}/drafts/${state.draftId}/history`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        throw new Error(await readApiError(res, `Clear history failed: ${res.status}`));
+      }
+
+      const data = await res.json();
+      applyHistoryState(data);
+    } catch (error) {
+      state.error = String(error);
+    } finally {
+      state.loading = false;
+    }
+  }
+
   return {
     state,
     catalogState,
@@ -773,6 +848,8 @@ export function usePosDraft(rawApiBase) {
     openCategoryDialog,
     submitAddCategory,
     deleteSelectedCategory,
+    deleteCategoryByPage,
+    swapCategories,
     openGridDialog,
     submitGridUpdate,
     openPriceDialog,
@@ -784,5 +861,6 @@ export function usePosDraft(rawApiBase) {
     undo,
     redo,
     jumpToHistory,
+    clearHistory,
   };
 }

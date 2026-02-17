@@ -49,8 +49,7 @@ public class AddButtonService implements AddButtonUseCase {
                 : item.getItemName();
         String newButtonId = "PresetMenuButtonMaster#NEW-" + UUID.randomUUID();
 
-        PosConfig updatedConfig = draft.getConfig().addButton(
-                pageNumber,
+        PosConfig.Button newButton = new PosConfig.Button(
                 col,
                 row,
                 label,
@@ -59,10 +58,17 @@ public class AddButtonService implements AddButtonUseCase {
                 item.getUnitPrice(),
                 newButtonId
         );
+        PosDraft.Change change = new PosDraft.AddButtonChange(pageNumber, newButton);
         String categoryName = DraftServiceSupport.resolveCategoryName(draft.getConfig(), pageNumber);
         String itemName = DraftServiceSupport.resolveItemName(item.getItemName(), item.getItemCode());
         String action = DraftServiceSupport.formatButtonAction("ボタン追加", categoryName, itemName);
-        DraftServiceSupport.saveUpdatedDraft(draftRepository, draft, updatedConfig, catalog, action);
-        return updatedConfig.getPage(pageNumber);
+        PosDraft updatedDraft = DraftServiceSupport.saveDraftWithChange(
+                draftRepository,
+                draft,
+                change,
+                catalog,
+                action
+        );
+        return updatedDraft.getConfig().getPage(pageNumber);
     }
 }

@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 public class PosConfig implements Serializable {
     private static final long serialVersionUID = 1L;
@@ -184,6 +185,46 @@ public class PosConfig implements Serializable {
         );
     }
 
+    public PosConfig restoreCategory(Category category, Page page) {
+        Objects.requireNonNull(category, "category is required");
+        Objects.requireNonNull(page, "page is required");
+
+        int pageNumber = category.getPageNumber();
+        if (page.getPageNumber() != pageNumber) {
+            throw new IllegalArgumentException("category/page mismatch: " + pageNumber + " != " + page.getPageNumber());
+        }
+        if (category.getCols() != page.getCols() || category.getRows() != page.getRows()) {
+            throw new IllegalArgumentException("category/page grid mismatch: " + pageNumber);
+        }
+        if (pagesByPageNumber.containsKey(pageNumber)) {
+            throw new IllegalArgumentException("page already exists: " + pageNumber);
+        }
+        for (Category existing : categories) {
+            if (existing.getPageNumber() == pageNumber) {
+                throw new IllegalArgumentException("category(page) already exists: " + pageNumber);
+            }
+        }
+        for (Button button : page.getButtons()) {
+            if (button.getCol() < 1 || button.getCol() > page.getCols()) {
+                throw new IllegalArgumentException("button col out of range: " + button.getCol());
+            }
+            if (button.getRow() < 1 || button.getRow() > page.getRows()) {
+                throw new IllegalArgumentException("button row out of range: " + button.getRow());
+            }
+        }
+
+        List<Category> updatedCategories = new ArrayList<>(categories);
+        updatedCategories.add(category);
+        updatedCategories.sort(Comparator.comparingInt(Category::getPageNumber));
+
+        Map<Integer, Page> updatedPages = new LinkedHashMap<>(pagesByPageNumber);
+        updatedPages.put(pageNumber, page);
+        return new PosConfig(
+                List.copyOf(updatedCategories),
+                Collections.unmodifiableMap(updatedPages)
+        );
+    }
+
     public PosConfig updateCategoryGrid(int pageNumber, int cols, int rows) {
         if (cols <= 0) {
             throw new IllegalArgumentException("cols must be positive");
@@ -233,6 +274,76 @@ public class PosConfig implements Serializable {
         );
         Map<Integer, Page> updatedPages = new LinkedHashMap<>(pagesByPageNumber);
         updatedPages.put(pageNumber, updatedPage);
+        return new PosConfig(
+                List.copyOf(updatedCategories),
+                Collections.unmodifiableMap(updatedPages)
+        );
+    }
+
+    public PosConfig swapCategories(int fromPageNumber, int toPageNumber) {
+        if (fromPageNumber == toPageNumber) {
+            return this;
+        }
+
+        Category fromCategory = null;
+        Category toCategory = null;
+        for (Category category : categories) {
+            if (category.getPageNumber() == fromPageNumber) {
+                fromCategory = category;
+            } else if (category.getPageNumber() == toPageNumber) {
+                toCategory = category;
+            }
+        }
+        if (fromCategory == null) {
+            throw new IllegalArgumentException("category(page) not found: " + fromPageNumber);
+        }
+        if (toCategory == null) {
+            throw new IllegalArgumentException("category(page) not found: " + toPageNumber);
+        }
+
+        Page fromPage = pagesByPageNumber.get(fromPageNumber);
+        Page toPage = pagesByPageNumber.get(toPageNumber);
+        if (fromPage == null) {
+            throw new IllegalArgumentException("page not found: " + fromPageNumber);
+        }
+        if (toPage == null) {
+            throw new IllegalArgumentException("page not found: " + toPageNumber);
+        }
+
+        List<Category> updatedCategories = new ArrayList<>(categories.size());
+        for (Category category : categories) {
+            if (category.getPageNumber() == fromPageNumber) {
+                updatedCategories.add(new Category(
+                        toPageNumber,
+                        category.getCols(),
+                        category.getRows(),
+                        category.getName(),
+                        category.getStyleKey()
+                ));
+            } else if (category.getPageNumber() == toPageNumber) {
+                updatedCategories.add(new Category(
+                        fromPageNumber,
+                        category.getCols(),
+                        category.getRows(),
+                        category.getName(),
+                        category.getStyleKey()
+                ));
+            } else {
+                updatedCategories.add(category);
+            }
+        }
+        updatedCategories.sort(Comparator.comparingInt(Category::getPageNumber));
+
+        Map<Integer, Page> updatedPages = new LinkedHashMap<>(pagesByPageNumber);
+        updatedPages.put(
+                fromPageNumber,
+                new Page(fromPageNumber, toPage.getCols(), toPage.getRows(), toPage.getButtons())
+        );
+        updatedPages.put(
+                toPageNumber,
+                new Page(toPageNumber, fromPage.getCols(), fromPage.getRows(), fromPage.getButtons())
+        );
+
         return new PosConfig(
                 List.copyOf(updatedCategories),
                 Collections.unmodifiableMap(updatedPages)

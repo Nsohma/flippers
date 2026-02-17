@@ -19,14 +19,23 @@ public class UpdateCategoryGridService implements UpdateCategoryGridUseCase {
         PosDraft draft = DraftServiceSupport.requireDraft(draftRepository, draftId);
         PosConfig.Page currentPage = DraftServiceSupport.requirePage(draft, pageNumber);
 
-        PosConfig updatedConfig = draft.getConfig().updateCategoryGrid(pageNumber, cols, rows);
+        PosDraft.Change change = new PosDraft.UpdateCategoryGridChange(
+                pageNumber,
+                currentPage.getCols(),
+                currentPage.getRows(),
+                cols,
+                rows
+        );
         String categoryName = DraftServiceSupport.resolveCategoryName(draft.getConfig(), pageNumber);
         String action = "グリッド変更 (" + categoryName + "、"
                 + currentPage.getCols() + "x" + currentPage.getRows()
                 + " -> " + cols + "x" + rows + ")";
 
-        PosDraft updatedDraft = draft.applyNewConfig(updatedConfig, action);
-        draftRepository.save(updatedDraft);
-        return updatedDraft;
+        return DraftServiceSupport.saveDraftWithChange(
+                draftRepository,
+                draft,
+                change,
+                action
+        );
     }
 }

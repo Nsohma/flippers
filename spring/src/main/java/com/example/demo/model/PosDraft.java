@@ -15,8 +15,9 @@ public class PosDraft implements Serializable {
     private final PosConfig config;
     private final byte[] originalExcelBytes;
     private final ItemCatalog itemCatalog;
-    private final List<PosConfig> history;
-    private final List<HistoryEntry> historyEntries;
+    private final String initialAction;
+    private final String initialTimestamp;
+    private final List<ChangeRecord> changes;
     private final int historyIndex;
 
     public PosDraft(String draftId, PosConfig config, byte[] originalExcelBytes) {
@@ -34,7 +35,16 @@ public class PosDraft implements Serializable {
             ItemCatalog itemCatalog,
             String initialAction
     ) {
-        this(draftId, config, originalExcelBytes, itemCatalog, null, null, -1, initialAction);
+        this(
+                draftId,
+                config,
+                originalExcelBytes,
+                itemCatalog,
+                initialAction,
+                OffsetDateTime.now().toString(),
+                null,
+                -1
+        );
     }
 
     private PosDraft(
@@ -42,43 +52,56 @@ public class PosDraft implements Serializable {
             PosConfig config,
             byte[] originalExcelBytes,
             ItemCatalog itemCatalog,
-            List<PosConfig> history,
-            List<HistoryEntry> historyEntries,
-            int historyIndex,
-            String fallbackAction
+            String initialAction,
+            String initialTimestamp,
+            List<ChangeRecord> changes,
+            int historyIndex
     ) {
         this.draftId = Objects.requireNonNull(draftId);
+        this.config = Objects.requireNonNull(config);
         this.originalExcelBytes = Objects.requireNonNull(originalExcelBytes).clone();
         this.itemCatalog = itemCatalog;
-        Objects.requireNonNull(config);
-
-        List<PosConfig> normalizedHistory = normalizeHistory(config, history);
-        List<HistoryEntry> normalizedHistoryEntries = normalizeHistoryEntries(
-                normalizedHistory,
-                historyEntries,
-                fallbackAction
-        );
-        int normalizedIndex = normalizeHistoryIndex(historyIndex, normalizedHistory.size());
-
-        this.history = normalizedHistory;
-        this.historyEntries = normalizedHistoryEntries;
-        this.historyIndex = normalizedIndex;
-        this.config = normalizedHistory.get(normalizedIndex);
+        this.initialAction = normalizeInitialAction(initialAction);
+        this.initialTimestamp = normalizeTimestamp(initialTimestamp);
+        this.changes = normalizeChanges(changes);
+        this.historyIndex = normalizeHistoryIndex(historyIndex, this.changes.size());
     }
 
-    public String getDraftId() { return draftId; }
-    public PosConfig getConfig() { return config; }
-    public byte[] getOriginalExcelBytes() { return originalExcelBytes.clone(); }
-    public ItemCatalog getItemCatalogOrNull() { return itemCatalog; }
-    public List<HistoryEntry> getHistoryEntries() { return historyEntries; }
-    public int getHistoryIndex() { return historyIndex; }
+    public String getDraftId() {
+        return draftId;
+    }
+
+    public PosConfig getConfig() {
+        return config;
+    }
+
+    public byte[] getOriginalExcelBytes() {
+        return originalExcelBytes.clone();
+    }
+
+    public ItemCatalog getItemCatalogOrNull() {
+        return itemCatalog;
+    }
+
+    public List<HistoryEntry> getHistoryEntries() {
+        List<HistoryEntry> entries = new ArrayList<>(changes.size() + 1);
+        entries.add(new HistoryEntry(initialAction, initialTimestamp));
+        for (ChangeRecord changeRecord : changes) {
+            entries.add(changeRecord.getEntry());
+        }
+        return List.copyOf(entries);
+    }
+
+    public int getHistoryIndex() {
+        return historyIndex;
+    }
 
     public boolean canUndo() {
         return historyIndex > 0;
     }
 
     public boolean canRedo() {
-        return historyIndex + 1 < history.size();
+        return historyIndex < changes.size();
     }
 
     public PosDraft applyNewConfig(PosConfig nextConfig) {
@@ -87,28 +110,32 @@ public class PosDraft implements Serializable {
 
     public PosDraft applyNewConfig(PosConfig nextConfig, String action) {
         Objects.requireNonNull(nextConfig);
+        return applyChange(new SnapshotReplaceChange(config, nextConfig), action);
+    }
 
-        List<PosConfig> nextHistory = new ArrayList<>(history.subList(0, historyIndex + 1));
-        List<HistoryEntry> nextHistoryEntries = new ArrayList<>(historyEntries.subList(0, historyIndex + 1));
-        nextHistory.add(nextConfig);
-        nextHistoryEntries.add(HistoryEntry.of(action));
+    public PosDraft applyChange(Change change, String action) {
+        Objects.requireNonNull(change);
 
-        if (nextHistory.size() > HISTORY_LIMIT) {
-            int removeCount = nextHistory.size() - HISTORY_LIMIT;
-            nextHistory = new ArrayList<>(nextHistory.subList(removeCount, nextHistory.size()));
-            nextHistoryEntries = new ArrayList<>(nextHistoryEntries.subList(removeCount, nextHistoryEntries.size()));
+        PosConfig nextConfig = change.apply(config);
+        List<ChangeRecord> nextChanges = new ArrayList<>(changes.subList(0, historyIndex));
+        nextChanges.add(new ChangeRecord(change, HistoryEntry.of(action)));
+
+        int nextHistoryIndex = nextChanges.size();
+        int removeCount = Math.max(0, (nextChanges.size() + 1) - HISTORY_LIMIT);
+        if (removeCount > 0) {
+            nextChanges = new ArrayList<>(nextChanges.subList(removeCount, nextChanges.size()));
+            nextHistoryIndex -= removeCount;
         }
 
-        int nextIndex = nextHistory.size() - 1;
         return new PosDraft(
                 draftId,
                 nextConfig,
                 originalExcelBytes,
                 itemCatalog,
-                nextHistory,
-                nextHistoryEntries,
-                nextIndex,
-                action
+                initialAction,
+                initialTimestamp,
+                nextChanges,
+                nextHistoryIndex
         );
     }
 
@@ -116,17 +143,17 @@ public class PosDraft implements Serializable {
         if (!canUndo()) {
             throw new IllegalArgumentException("undo not available");
         }
-        int nextIndex = historyIndex - 1;
-        PosConfig nextConfig = history.get(nextIndex);
+        ChangeRecord changeRecord = changes.get(historyIndex - 1);
+        PosConfig previousConfig = changeRecord.getChange().undo(config);
         return new PosDraft(
                 draftId,
-                nextConfig,
+                previousConfig,
                 originalExcelBytes,
                 itemCatalog,
-                history,
-                historyEntries,
-                nextIndex,
-                null
+                initialAction,
+                initialTimestamp,
+                changes,
+                historyIndex - 1
         );
     }
 
@@ -134,37 +161,52 @@ public class PosDraft implements Serializable {
         if (!canRedo()) {
             throw new IllegalArgumentException("redo not available");
         }
-        int nextIndex = historyIndex + 1;
-        PosConfig nextConfig = history.get(nextIndex);
+        ChangeRecord changeRecord = changes.get(historyIndex);
+        PosConfig nextConfig = changeRecord.getChange().apply(config);
         return new PosDraft(
                 draftId,
                 nextConfig,
                 originalExcelBytes,
                 itemCatalog,
-                history,
-                historyEntries,
-                nextIndex,
-                null
+                initialAction,
+                initialTimestamp,
+                changes,
+                historyIndex + 1
         );
     }
 
     public PosDraft jumpToHistoryIndex(int targetIndex) {
-        if (targetIndex < 0 || targetIndex >= history.size()) {
+        if (targetIndex < 0 || targetIndex > changes.size()) {
             throw new IllegalArgumentException("history index out of range: " + targetIndex);
         }
         if (targetIndex == historyIndex) {
             return this;
         }
-        PosConfig targetConfig = history.get(targetIndex);
+
+        PosDraft current = this;
+        while (current.historyIndex < targetIndex) {
+            current = current.redo();
+        }
+        while (current.historyIndex > targetIndex) {
+            current = current.undo();
+        }
+        return current;
+    }
+
+    public PosDraft clearHistory() {
+        return clearHistory("履歴削除");
+    }
+
+    public PosDraft clearHistory(String action) {
         return new PosDraft(
                 draftId,
-                targetConfig,
+                config,
                 originalExcelBytes,
                 itemCatalog,
-                history,
-                historyEntries,
-                targetIndex,
-                null
+                action,
+                OffsetDateTime.now().toString(),
+                List.of(),
+                -1
         );
     }
 
@@ -177,88 +219,317 @@ public class PosDraft implements Serializable {
                 config,
                 originalExcelBytes,
                 nextItemCatalog,
-                history,
-                historyEntries,
-                historyIndex,
-                null
+                initialAction,
+                initialTimestamp,
+                changes,
+                historyIndex
         );
     }
 
     private Object readResolve() throws ObjectStreamException {
-        List<PosConfig> normalizedHistory = normalizeHistory(config, history);
-        List<HistoryEntry> normalizedHistoryEntries = normalizeHistoryEntries(
-                normalizedHistory,
-                historyEntries,
-                "復元"
-        );
-        int normalizedIndex = normalizeHistoryIndex(historyIndex, normalizedHistory.size());
-        if (normalizedHistory == history
-                && normalizedHistoryEntries == historyEntries
-                && normalizedIndex == historyIndex
-                && config == normalizedHistory.get(normalizedIndex)) {
-            return this;
-        }
         return new PosDraft(
                 draftId,
-                normalizedHistory.get(normalizedIndex),
+                config,
                 originalExcelBytes,
                 itemCatalog,
-                normalizedHistory,
-                normalizedHistoryEntries,
-                normalizedIndex,
-                null
+                initialAction,
+                initialTimestamp,
+                changes,
+                historyIndex
         );
     }
 
-    private static List<PosConfig> normalizeHistory(PosConfig config, List<PosConfig> history) {
-        if (history == null || history.isEmpty()) {
-            return List.of(config);
+    private static List<ChangeRecord> normalizeChanges(List<ChangeRecord> changes) {
+        if (changes == null || changes.isEmpty()) {
+            return List.of();
         }
-        return List.copyOf(history);
+        return List.copyOf(changes);
     }
 
-    private static List<HistoryEntry> normalizeHistoryEntries(
-            List<PosConfig> normalizedHistory,
-            List<HistoryEntry> historyEntries,
-            String fallbackAction
-    ) {
-        if (historyEntries == null || historyEntries.isEmpty()) {
-            return fillFallbackHistoryEntries(normalizedHistory.size(), fallbackAction);
-        }
-        if (historyEntries.size() == normalizedHistory.size()) {
-            return List.copyOf(historyEntries);
-        }
-        int targetSize = normalizedHistory.size();
-        List<HistoryEntry> adjusted = new ArrayList<>(targetSize);
-        int offset = Math.max(0, historyEntries.size() - targetSize);
-        for (int i = 0; i < targetSize; i++) {
-            int sourceIndex = i + offset;
-            if (sourceIndex >= 0 && sourceIndex < historyEntries.size()) {
-                adjusted.add(historyEntries.get(sourceIndex));
-            } else {
-                adjusted.add(HistoryEntry.of(fallbackAction));
-            }
-        }
-        return List.copyOf(adjusted);
-    }
-
-    private static List<HistoryEntry> fillFallbackHistoryEntries(int size, String fallbackAction) {
-        int targetSize = Math.max(1, size);
-        List<HistoryEntry> entries = new ArrayList<>(targetSize);
-        for (int i = 0; i < targetSize; i++) {
-            entries.add(HistoryEntry.of(fallbackAction));
-        }
-        return List.copyOf(entries);
-    }
-
-    private static int normalizeHistoryIndex(int historyIndex, int historySize) {
-        if (historySize <= 0) {
-            return 0;
-        }
-        if (historyIndex < 0 || historyIndex >= historySize) {
-            return historySize - 1;
+    private static int normalizeHistoryIndex(int historyIndex, int changeCount) {
+        if (historyIndex < 0 || historyIndex > changeCount) {
+            return changeCount;
         }
         return historyIndex;
+    }
+
+    private static String normalizeInitialAction(String action) {
+        if (action == null || action.isBlank()) {
+            return "インポート";
+        }
+        return action;
+    }
+
+    private static String normalizeTimestamp(String timestamp) {
+        if (timestamp == null || timestamp.isBlank()) {
+            return OffsetDateTime.now().toString();
+        }
+        return timestamp;
+    }
+
+    public interface Change extends Serializable {
+        PosConfig apply(PosConfig config);
+
+        PosConfig undo(PosConfig config);
+    }
+
+    public static class SwapButtonsChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final int pageNumber;
+        private final int fromCol;
+        private final int fromRow;
+        private final int toCol;
+        private final int toRow;
+
+        public SwapButtonsChange(int pageNumber, int fromCol, int fromRow, int toCol, int toRow) {
+            this.pageNumber = pageNumber;
+            this.fromCol = fromCol;
+            this.fromRow = fromRow;
+            this.toCol = toCol;
+            this.toRow = toRow;
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            return config.swapButtons(pageNumber, fromCol, fromRow, toCol, toRow);
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return config.swapButtons(pageNumber, toCol, toRow, fromCol, fromRow);
+        }
+    }
+
+    public static class AddButtonChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final int pageNumber;
+        private final PosConfig.Button button;
+
+        public AddButtonChange(int pageNumber, PosConfig.Button button) {
+            this.pageNumber = pageNumber;
+            this.button = Objects.requireNonNull(button);
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            return config.addButton(
+                    pageNumber,
+                    button.getCol(),
+                    button.getRow(),
+                    button.getLabel(),
+                    button.getStyleKey(),
+                    button.getItemCode(),
+                    button.getUnitPrice(),
+                    button.getButtonId()
+            );
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return config.deleteButton(pageNumber, button.getButtonId());
+        }
+    }
+
+    public static class DeleteButtonChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final int pageNumber;
+        private final PosConfig.Button button;
+
+        public DeleteButtonChange(int pageNumber, PosConfig.Button button) {
+            this.pageNumber = pageNumber;
+            this.button = Objects.requireNonNull(button);
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            return config.deleteButton(pageNumber, button.getButtonId());
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return config.addButton(
+                    pageNumber,
+                    button.getCol(),
+                    button.getRow(),
+                    button.getLabel(),
+                    button.getStyleKey(),
+                    button.getItemCode(),
+                    button.getUnitPrice(),
+                    button.getButtonId()
+            );
+        }
+    }
+
+    public static class UpdateUnitPriceChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final int pageNumber;
+        private final String buttonId;
+        private final String beforeUnitPrice;
+        private final String afterUnitPrice;
+
+        public UpdateUnitPriceChange(int pageNumber, String buttonId, String beforeUnitPrice, String afterUnitPrice) {
+            this.pageNumber = pageNumber;
+            this.buttonId = Objects.requireNonNull(buttonId);
+            this.beforeUnitPrice = beforeUnitPrice == null ? "" : beforeUnitPrice;
+            this.afterUnitPrice = afterUnitPrice == null ? "" : afterUnitPrice;
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            return config.updateUnitPrice(pageNumber, buttonId, afterUnitPrice);
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return config.updateUnitPrice(pageNumber, buttonId, beforeUnitPrice);
+        }
+    }
+
+    public static class AddCategoryChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final PosConfig.Category category;
+
+        public AddCategoryChange(PosConfig.Category category) {
+            this.category = Objects.requireNonNull(category);
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            PosConfig.Page emptyPage = new PosConfig.Page(
+                    category.getPageNumber(),
+                    category.getCols(),
+                    category.getRows(),
+                    List.of()
+            );
+            return config.restoreCategory(category, emptyPage);
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return config.deleteCategory(category.getPageNumber());
+        }
+    }
+
+    public static class DeleteCategoryChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final PosConfig.Category category;
+        private final PosConfig.Page page;
+
+        public DeleteCategoryChange(PosConfig.Category category, PosConfig.Page page) {
+            this.category = Objects.requireNonNull(category);
+            this.page = Objects.requireNonNull(page);
+            if (category.getPageNumber() != page.getPageNumber()) {
+                throw new IllegalArgumentException("category/page mismatch");
+            }
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            return config.deleteCategory(category.getPageNumber());
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return config.restoreCategory(category, page);
+        }
+    }
+
+    public static class UpdateCategoryGridChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final int pageNumber;
+        private final int fromCols;
+        private final int fromRows;
+        private final int toCols;
+        private final int toRows;
+
+        public UpdateCategoryGridChange(int pageNumber, int fromCols, int fromRows, int toCols, int toRows) {
+            this.pageNumber = pageNumber;
+            this.fromCols = fromCols;
+            this.fromRows = fromRows;
+            this.toCols = toCols;
+            this.toRows = toRows;
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            return config.updateCategoryGrid(pageNumber, toCols, toRows);
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return config.updateCategoryGrid(pageNumber, fromCols, fromRows);
+        }
+    }
+
+    public static class SwapCategoriesChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final int fromPageNumber;
+        private final int toPageNumber;
+
+        public SwapCategoriesChange(int fromPageNumber, int toPageNumber) {
+            this.fromPageNumber = fromPageNumber;
+            this.toPageNumber = toPageNumber;
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            return config.swapCategories(fromPageNumber, toPageNumber);
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return config.swapCategories(fromPageNumber, toPageNumber);
+        }
+    }
+
+    private static class SnapshotReplaceChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final PosConfig beforeConfig;
+        private final PosConfig afterConfig;
+
+        private SnapshotReplaceChange(PosConfig beforeConfig, PosConfig afterConfig) {
+            this.beforeConfig = Objects.requireNonNull(beforeConfig);
+            this.afterConfig = Objects.requireNonNull(afterConfig);
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            return afterConfig;
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return beforeConfig;
+        }
+    }
+
+    private static class ChangeRecord implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        private final Change change;
+        private final HistoryEntry entry;
+
+        private ChangeRecord(Change change, HistoryEntry entry) {
+            this.change = Objects.requireNonNull(change);
+            this.entry = Objects.requireNonNull(entry);
+        }
+
+        private Change getChange() {
+            return change;
+        }
+
+        private HistoryEntry getEntry() {
+            return entry;
+        }
     }
 
     public static class HistoryEntry implements Serializable {

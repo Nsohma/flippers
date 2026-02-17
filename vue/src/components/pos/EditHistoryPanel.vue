@@ -10,8 +10,12 @@ const props = defineProps({
     type: Number,
     default: -1,
   },
+  loading: {
+    type: Boolean,
+    default: false,
+  },
 });
-const emit = defineEmits(["jump"]);
+const emit = defineEmits(["jump", "clear"]);
 
 const expanded = ref(false);
 const reversedEntries = computed(() =>
@@ -38,6 +42,7 @@ const currentEntry = computed(() => {
   if (!Number.isInteger(props.currentIndex) || props.currentIndex < 0) return null;
   return reversedEntries.value.find((entry) => entry.index === props.currentIndex) ?? null;
 });
+const canClear = computed(() => props.entries.length > 1 && !props.loading);
 
 function toggleExpanded() {
   expanded.value = !expanded.value;
@@ -74,15 +79,27 @@ function formatTimestamp(value) {
         </div>
       </div>
 
-      <button
-        class="expand-btn"
-        type="button"
-        :aria-expanded="expanded"
-        :title="expanded ? '履歴を折りたたむ' : '履歴を展開する'"
-        @click="toggleExpanded"
-      >
-        <span class="arrow" :class="{ open: expanded }">▼</span>
-      </button>
+      <div class="head-actions">
+        <button
+          class="clear-btn"
+          type="button"
+          :disabled="!canClear"
+          title="編集履歴を削除"
+          @click="emit('clear')"
+        >
+          履歴削除
+        </button>
+
+        <button
+          class="expand-btn"
+          type="button"
+          :aria-expanded="expanded"
+          :title="expanded ? '履歴を折りたたむ' : '履歴を展開する'"
+          @click="toggleExpanded"
+        >
+          <span class="arrow" :class="{ open: expanded }">▼</span>
+        </button>
+      </div>
     </div>
 
     <ol v-if="expanded" class="history-list">
@@ -116,6 +133,11 @@ function formatTimestamp(value) {
   justify-content: space-between;
   gap: 8px;
 }
+.head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .title-wrap {
   display: flex;
   flex-direction: column;
@@ -144,6 +166,20 @@ function formatTimestamp(value) {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+.clear-btn {
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid #d1d8e5;
+  background: #fff;
+  color: #234;
+  padding: 0 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.clear-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .arrow {
   display: inline-block;

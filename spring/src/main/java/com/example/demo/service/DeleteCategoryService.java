@@ -17,8 +17,16 @@ public class DeleteCategoryService implements DeleteCategoryUseCase {
     @Override
     public PosConfig deleteCategory(String draftId, int pageNumber) {
         PosDraft draft = DraftServiceSupport.requireDraft(draftRepository, draftId);
-        PosConfig updatedConfig = draft.getConfig().deleteCategory(pageNumber);
-        DraftServiceSupport.saveUpdatedDraft(draftRepository, draft, updatedConfig, null, "カテゴリ削除");
-        return updatedConfig;
+        PosConfig.Category targetCategory = DraftServiceSupport.requireCategory(draft, pageNumber);
+        PosConfig.Page targetPage = DraftServiceSupport.requirePage(draft, pageNumber);
+
+        PosDraft.Change change = new PosDraft.DeleteCategoryChange(targetCategory, targetPage);
+        PosDraft updatedDraft = DraftServiceSupport.saveDraftWithChange(
+                draftRepository,
+                draft,
+                change,
+                "カテゴリ削除"
+        );
+        return updatedDraft.getConfig();
     }
 }

@@ -17,11 +17,22 @@ public class UpdateUnitPriceService implements UpdateUnitPriceUseCase {
     @Override
     public PosConfig.Page updateUnitPrice(String draftId, int pageNumber, String buttonId, String unitPrice) {
         PosDraft draft = DraftServiceSupport.requireDraft(draftRepository, draftId);
-        DraftServiceSupport.requirePage(draft, pageNumber);
+        PosConfig.Page currentPage = DraftServiceSupport.requirePage(draft, pageNumber);
+        PosConfig.Button targetButton = DraftServiceSupport.requireButton(currentPage, buttonId);
 
         String normalizedUnitPrice = DraftServiceSupport.normalizeUnitPrice(unitPrice);
-        PosConfig updatedConfig = draft.getConfig().updateUnitPrice(pageNumber, buttonId, normalizedUnitPrice);
-        DraftServiceSupport.saveUpdatedDraft(draftRepository, draft, updatedConfig, null, "価格変更");
-        return updatedConfig.getPage(pageNumber);
+        PosDraft.Change change = new PosDraft.UpdateUnitPriceChange(
+                pageNumber,
+                buttonId,
+                targetButton.getUnitPrice(),
+                normalizedUnitPrice
+        );
+        PosDraft updatedDraft = DraftServiceSupport.saveDraftWithChange(
+                draftRepository,
+                draft,
+                change,
+                "価格変更"
+        );
+        return updatedDraft.getConfig().getPage(pageNumber);
     }
 }

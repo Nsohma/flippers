@@ -45,6 +45,9 @@
 14. Excelエクスポート (`/api/pos/drafts/{draftId}/export`)
 15. エクスポート時に `PresetMenuButtonMaster` を `(A,B,C)`= `(PageNumber, ButtonColumnNumber, ButtonRowNumber)` 順で整列再構築
 16. エクスポート時に `PresetMenuMaster` 再構築、`ItemMaster.UnitPrice` 更新、削除ボタン行の実質除去（再構築で未出力）
+17. 上段カテゴリ同士の入れ替え（ドラッグ&ドロップ）
+18. 上段カテゴリをゴミ箱へドラッグして削除
+19. 編集履歴の削除（現在状態を新しい起点にして履歴を初期化）
 
 ## アーキテクチャ概要
 この実装は、**ドメインモデル (`PosConfig`) を中心に置いた凹型レイヤ（ヘキサゴナル寄り）** の構成です。
@@ -65,7 +68,7 @@
 - `spring/src/main/java/com/example/demo/controller/PosImportController.java`
   - Import API。アップロードファイルを `ImportPosUseCase` に渡し、初期カテゴリ/初期ページを返却。
 - `spring/src/main/java/com/example/demo/controller/PosDraftController.java`
-  - Draft編集API群（ページ取得、swap、追加、削除、価格変更、カテゴリ追加削除、グリッド変更、undo/redo、履歴取得・ジャンプ、export）。
+  - Draft編集API群（ページ取得、swap、追加、削除、価格変更、カテゴリ追加削除、カテゴリ入れ替え、グリッド変更、undo/redo、履歴取得・ジャンプ・削除、export）。
 - `spring/src/main/java/com/example/demo/controller/GlobalExceptionHandler.java`
   - 例外を `ErrorResponse` へ統一変換（400/404/500）。
 - `spring/src/main/java/com/example/demo/controller/CorsConfig.java`
@@ -82,13 +85,15 @@
 - `spring/src/main/java/com/example/demo/service/UpdateUnitPriceService.java`
 - `spring/src/main/java/com/example/demo/service/AddCategoryService.java`
 - `spring/src/main/java/com/example/demo/service/DeleteCategoryService.java`
+- `spring/src/main/java/com/example/demo/service/SwapCategoriesService.java`
 - `spring/src/main/java/com/example/demo/service/UpdateCategoryGridService.java`
   - それぞれの編集操作をユースケース単位で実行し、更新後ドラフトを保存（SRP分割済み）。
 - `spring/src/main/java/com/example/demo/service/UndoDraftService.java`
 - `spring/src/main/java/com/example/demo/service/RedoDraftService.java`
 - `spring/src/main/java/com/example/demo/service/GetDraftHistoryService.java`
 - `spring/src/main/java/com/example/demo/service/JumpDraftHistoryService.java`
-  - Undo/Redo/履歴取得/履歴ジャンプの編集状態制御。
+- `spring/src/main/java/com/example/demo/service/ClearDraftHistoryService.java`
+  - Undo/Redo/履歴取得/履歴ジャンプ/履歴削除の編集状態制御。
 - `spring/src/main/java/com/example/demo/service/GetItemCatalogService.java`
   - 空セル追加用の商品カタログを返却。
 - `spring/src/main/java/com/example/demo/service/ExportPosService.java`
@@ -100,10 +105,10 @@
 - `spring/src/main/java/com/example/demo/model/PosConfig.java`
   - ドメイン集約ルート。
   - 上段カテゴリ (`Category`) と下段ページ (`Page`) を保持。
-  - 主要操作は `swapButtons`, `addButton`, `deleteButton`, `updateUnitPrice`, `addCategory`, `deleteCategory`, `updateCategoryGrid`。
+  - 主要操作は `swapButtons`, `addButton`, `deleteButton`, `updateUnitPrice`, `addCategory`, `deleteCategory`, `swapCategories`, `updateCategoryGrid`。
 - `spring/src/main/java/com/example/demo/model/PosDraft.java`
   - `draftId + PosConfig + originalExcelBytes` の編集セッション単位。
-  - `history`, `historyEntries`, `historyIndex` を保持し、`undo`, `redo`, `jumpToHistoryIndex` を提供。
+  - 差分ベース履歴（`changes`, `historyEntries`, `historyIndex`）を保持し、`undo`, `redo`, `jumpToHistoryIndex`, `clearHistory` を提供。
   - `ItemCatalog` を保持し、再パース回数を抑制。
 - `spring/src/main/java/com/example/demo/model/PosConfigSource.java`
   - ReaderがExcelから抽出した中間データ。
@@ -132,11 +137,11 @@
 現状フロントは、`App.vue` をシェルとして composable + component に分割済みです。
 
 - `vue/src/composables/usePosDraft.js`
-  - 状態管理 + API呼び出し（Import/Export、編集操作、Undo/Redo、履歴取得、履歴ジャンプ）。
+  - 状態管理 + API呼び出し（Import/Export、編集操作、Undo/Redo、履歴取得、履歴ジャンプ、履歴削除）。
 - `vue/src/composables/useDragDrop.js`
   - 下段グリッドのドラッグ&ドロップ制御。
 - `vue/src/components/pos/CategoryTabs.vue`
-  - 上段カテゴリ表示、カテゴリ追加/削除操作。
+  - 上段カテゴリ表示、カテゴリ追加、カテゴリD&D入れ替え、ゴミ箱へのD&D削除。
 - `vue/src/components/pos/ButtonGrid.vue`
   - 下段グリッド表示、ボタン追加/削除/価格変更/ドラッグ、`Page (col x row)` 右側のグリッド変更ボタン。
 - `vue/src/components/pos/AddDialog.vue`
@@ -148,7 +153,7 @@
 - `vue/src/components/pos/GridDialog.vue`
   - グリッド（列/行）変更ダイアログ。
 - `vue/src/components/pos/EditHistoryPanel.vue`
-  - 編集履歴表示（折りたたみ、展開、現在位置表示、クリックジャンプ）。
+  - 編集履歴表示（折りたたみ、展開、現在位置表示、クリックジャンプ、履歴削除）。
 
 ## API一覧（実装済み）
 - `POST /api/pos/import`
@@ -160,11 +165,13 @@
 - `GET /api/pos/drafts/{draftId}/item-categories`
 - `POST /api/pos/drafts/{draftId}/categories`
 - `DELETE /api/pos/drafts/{draftId}/categories/{pageNumber}`
+- `PATCH /api/pos/drafts/{draftId}/categories/swap`
 - `PATCH /api/pos/drafts/{draftId}/categories/{pageNumber}/grid`
 - `POST /api/pos/drafts/{draftId}/undo`
 - `POST /api/pos/drafts/{draftId}/redo`
 - `GET /api/pos/drafts/{draftId}/history`
 - `POST /api/pos/drafts/{draftId}/history/jump?index={historyIndex}`
+- `DELETE /api/pos/drafts/{draftId}/history`
 - `GET /api/pos/drafts/{draftId}/export`
 
 ## 凹型レイヤ観点での補足

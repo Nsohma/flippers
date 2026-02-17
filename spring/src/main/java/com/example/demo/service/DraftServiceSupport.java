@@ -28,6 +28,15 @@ final class DraftServiceSupport {
         return page;
     }
 
+    static PosConfig.Category requireCategory(PosDraft draft, int pageNumber) {
+        for (PosConfig.Category category : draft.getConfig().getCategories()) {
+            if (category.getPageNumber() == pageNumber) {
+                return category;
+            }
+        }
+        throw new NotFoundException("category(page) not found: " + pageNumber);
+    }
+
     static void saveUpdatedDraft(DraftRepository draftRepository, PosDraft draft, PosConfig updatedConfig) {
         saveUpdatedDraft(draftRepository, draft, updatedConfig, draft.getItemCatalogOrNull());
     }
@@ -51,6 +60,34 @@ final class DraftServiceSupport {
         PosDraft baseDraft = draft.withItemCatalog(itemCatalog);
         PosDraft updatedDraft = baseDraft.applyNewConfig(updatedConfig, action);
         draftRepository.save(updatedDraft);
+    }
+
+    static PosDraft saveDraftWithChange(
+            DraftRepository draftRepository,
+            PosDraft draft,
+            PosDraft.Change change,
+            ItemCatalog itemCatalog,
+            String action
+    ) {
+        PosDraft baseDraft = draft.withItemCatalog(itemCatalog);
+        PosDraft updatedDraft = baseDraft.applyChange(change, action);
+        draftRepository.save(updatedDraft);
+        return updatedDraft;
+    }
+
+    static PosDraft saveDraftWithChange(
+            DraftRepository draftRepository,
+            PosDraft draft,
+            PosDraft.Change change,
+            String action
+    ) {
+        return saveDraftWithChange(
+                draftRepository,
+                draft,
+                change,
+                draft.getItemCatalogOrNull(),
+                action
+        );
     }
 
     static ItemCatalog loadItemCatalog(PosDraft draft, PosConfigReader reader, DraftRepository draftRepository) {

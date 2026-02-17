@@ -26,8 +26,13 @@ public class SwapButtonsService implements SwapButtonsUseCase {
         PosDraft draft = DraftServiceSupport.requireDraft(draftRepository, draftId);
         DraftServiceSupport.requirePage(draft, pageNumber);
 
-        PosConfig updatedConfig = draft.getConfig().swapButtons(pageNumber, fromCol, fromRow, toCol, toRow);
-        DraftServiceSupport.saveUpdatedDraft(draftRepository, draft, updatedConfig, null, "ボタン入れ替え");
-        return updatedConfig.getPage(pageNumber);
+        PosDraft.Change change = new PosDraft.SwapButtonsChange(pageNumber, fromCol, fromRow, toCol, toRow);
+        PosDraft updatedDraft = DraftServiceSupport.saveDraftWithChange(
+                draftRepository,
+                draft,
+                change,
+                "ボタン入れ替え"
+        );
+        return updatedDraft.getConfig().getPage(pageNumber);
     }
 }

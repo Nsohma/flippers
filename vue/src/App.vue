@@ -36,6 +36,8 @@ const {
   openCategoryDialog,
   submitAddCategory,
   deleteSelectedCategory,
+  deleteCategoryByPage,
+  swapCategories,
   openGridDialog,
   submitGridUpdate,
   openPriceDialog,
@@ -47,6 +49,7 @@ const {
   undo,
   redo,
   jumpToHistory,
+  clearHistory,
 } = usePosDraft(API_BASE);
 
 const loadingRef = computed(() => state.loading);
@@ -98,6 +101,8 @@ async function onImportClick() {
       :selected-page-number="state.selectedPageNumber"
       :loading="state.loading"
       @select-page="loadPage"
+      @swap-categories="({ fromPageNumber, toPageNumber }) => swapCategories(fromPageNumber, toPageNumber)"
+      @delete-category-page="({ pageNumber }) => deleteCategoryByPage(pageNumber)"
       @add-category="openCategoryDialog"
       @delete-category="deleteSelectedCategory"
     />
@@ -106,7 +111,9 @@ async function onImportClick() {
       v-if="state.draftId"
       :entries="state.historyEntries"
       :current-index="state.historyIndex"
+      :loading="state.loading"
       @jump="jumpToHistory"
+      @clear="clearHistory"
     />
 
     <ButtonGrid

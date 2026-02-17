@@ -20,11 +20,16 @@ public class DeleteButtonService implements DeleteButtonUseCase {
         PosConfig.Page currentPage = DraftServiceSupport.requirePage(draft, pageNumber);
         PosConfig.Button targetButton = DraftServiceSupport.requireButton(currentPage, buttonId);
 
-        PosConfig updatedConfig = draft.getConfig().deleteButton(pageNumber, buttonId);
+        PosDraft.Change change = new PosDraft.DeleteButtonChange(pageNumber, targetButton);
         String categoryName = DraftServiceSupport.resolveCategoryName(draft.getConfig(), pageNumber);
         String buttonName = DraftServiceSupport.resolveButtonName(targetButton);
         String action = DraftServiceSupport.formatButtonAction("ボタン削除", categoryName, buttonName);
-        DraftServiceSupport.saveUpdatedDraft(draftRepository, draft, updatedConfig, null, action);
-        return updatedConfig.getPage(pageNumber);
+        PosDraft updatedDraft = DraftServiceSupport.saveDraftWithChange(
+                draftRepository,
+                draft,
+                change,
+                action
+        );
+        return updatedDraft.getConfig().getPage(pageNumber);
     }
 }

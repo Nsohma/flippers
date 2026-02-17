@@ -41,8 +41,28 @@ public class AddCategoryService implements AddCategoryUseCase {
             resolvedStyleKey = 1;
         }
 
-        PosConfig updatedConfig = draft.getConfig().addCategory(name, resolvedCols, resolvedRows, resolvedStyleKey);
-        DraftServiceSupport.saveUpdatedDraft(draftRepository, draft, updatedConfig, null, "カテゴリ追加");
-        return updatedConfig;
+        String normalizedName = name == null ? "" : name.trim();
+        if (normalizedName.isEmpty()) {
+            throw new IllegalArgumentException("category name is required");
+        }
+        int nextPageNumber = draft.getConfig().getCategories().stream()
+                .mapToInt(PosConfig.Category::getPageNumber)
+                .max()
+                .orElse(0) + 1;
+        PosConfig.Category newCategory = new PosConfig.Category(
+                nextPageNumber,
+                resolvedCols,
+                resolvedRows,
+                normalizedName,
+                resolvedStyleKey
+        );
+        PosDraft.Change change = new PosDraft.AddCategoryChange(newCategory);
+        PosDraft updatedDraft = DraftServiceSupport.saveDraftWithChange(
+                draftRepository,
+                draft,
+                change,
+                "カテゴリ追加"
+        );
+        return updatedDraft.getConfig();
     }
 }
