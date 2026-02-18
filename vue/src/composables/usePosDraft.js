@@ -343,12 +343,12 @@ function createPosDraftStore(API_BASE) {
   }
 
   async function swapHandyCategories(fromCategoryCode, toCategoryCode) {
-    if (state.loading || !state.draftId) return;
+    if (state.loading || !state.draftId) return false;
 
     const fromCode = String(fromCategoryCode ?? "").trim();
     const toCode = String(toCategoryCode ?? "").trim();
-    if (!fromCode || !toCode) return;
-    if (fromCode === toCode) return;
+    if (!fromCode || !toCode) return false;
+    if (fromCode === toCode) return false;
 
     state.error = "";
     state.loading = true;
@@ -374,20 +374,58 @@ function createPosDraftStore(API_BASE) {
       }
       markHistoryMutated();
       await loadHistory(true);
+      return true;
     } catch (error) {
       state.error = String(error);
+      return false;
+    } finally {
+      state.loading = false;
+    }
+  }
+
+  async function reorderHandyCategories(fromIndex, toIndex) {
+    if (state.loading || !state.draftId) return false;
+    if (!Number.isInteger(fromIndex) || fromIndex < 0) return false;
+    if (!Number.isInteger(toIndex) || toIndex < 0) return false;
+    if (fromIndex === toIndex) return false;
+
+    state.error = "";
+    state.loading = true;
+    try {
+      const res = await fetch(`${API_BASE}/drafts/${state.draftId}/handy-categories/reorder`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromIndex, toIndex }),
+      });
+      if (!res.ok) {
+        throw new Error(await readApiError(res, `Reorder handy categories failed: ${res.status}`));
+      }
+
+      const data = await res.json();
+      const categories = Array.isArray(data?.categories) ? data.categories : [];
+      handyCatalogState.categories = categories;
+      handyCatalogState.loaded = true;
+      if (!categories.some((category) => category.code === handyCatalogState.selectedCategoryCode)) {
+        handyCatalogState.selectedCategoryCode = categories[0]?.code ?? "";
+      }
+      markHistoryMutated();
+      await loadHistory(true);
+      return true;
+    } catch (error) {
+      state.error = String(error);
+      return false;
     } finally {
       state.loading = false;
     }
   }
 
   async function reorderHandyItems(categoryCode, fromIndex, toIndex) {
-    if (state.loading || !state.draftId) return;
+    if (state.loading || !state.draftId) return false;
 
     const code = String(categoryCode ?? "").trim();
-    if (!code) return;
-    if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex)) return;
-    if (fromIndex === toIndex) return;
+    if (!code) return false;
+    if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex)) return false;
+    if (fromIndex === toIndex) return false;
 
     state.error = "";
     state.loading = true;
@@ -415,19 +453,21 @@ function createPosDraftStore(API_BASE) {
       }
       markHistoryMutated();
       await loadHistory(true);
+      return true;
     } catch (error) {
       state.error = String(error);
+      return false;
     } finally {
       state.loading = false;
     }
   }
 
   async function deleteHandyItem(categoryCode, itemIndex) {
-    if (state.loading || !state.draftId) return;
+    if (state.loading || !state.draftId) return false;
 
     const code = String(categoryCode ?? "").trim();
-    if (!code) return;
-    if (!Number.isInteger(itemIndex) || itemIndex < 0) return;
+    if (!code) return false;
+    if (!Number.isInteger(itemIndex) || itemIndex < 0) return false;
 
     state.error = "";
     state.loading = true;
@@ -451,8 +491,10 @@ function createPosDraftStore(API_BASE) {
       }
       markHistoryMutated();
       await loadHistory(true);
+      return true;
     } catch (error) {
       state.error = String(error);
+      return false;
     } finally {
       state.loading = false;
     }
@@ -483,7 +525,7 @@ function createPosDraftStore(API_BASE) {
   }
 
   async function submitAddHandyCategory() {
-    if (state.loading || !state.draftId || !handyCategoryDialog.open) return;
+    if (state.loading || !state.draftId || !handyCategoryDialog.open) return false;
 
     const description = String(handyCategoryDialog.description ?? "").trim();
     const previousCodes = new Set(
@@ -516,18 +558,20 @@ function createPosDraftStore(API_BASE) {
       closeHandyCategoryDialog();
       markHistoryMutated();
       await loadHistory(true);
+      return true;
     } catch (error) {
       state.error = String(error);
+      return false;
     } finally {
       state.loading = false;
     }
   }
 
   async function deleteHandyCategory(categoryCode) {
-    if (state.loading || !state.draftId) return;
+    if (state.loading || !state.draftId) return false;
 
     const code = String(categoryCode ?? "").trim();
-    if (!code) return;
+    if (!code) return false;
     const previousSelectedCode = handyCatalogState.selectedCategoryCode;
 
     state.error = "";
@@ -557,31 +601,33 @@ function createPosDraftStore(API_BASE) {
       }
       markHistoryMutated();
       await loadHistory(true);
+      return true;
     } catch (error) {
       state.error = String(error);
+      return false;
     } finally {
       state.loading = false;
     }
   }
 
   async function addHandyItemFromCatalog(handyCategoryCode, item) {
-    if (state.loading || !state.draftId || !handyAddDialog.open) return;
+    if (state.loading || !state.draftId || !handyAddDialog.open) return false;
 
     const targetCategoryCode = String(handyCategoryCode ?? "").trim();
     if (!targetCategoryCode) {
       state.error = "追加先カテゴリが選択されていません";
-      return;
+      return false;
     }
 
     const sourceCategoryCode = String(handyAddDialog.categoryCode ?? "").trim();
     const itemCode = String(item?.itemCode ?? "").trim();
     if (!sourceCategoryCode) {
       state.error = "絞り込みカテゴリを選択してください";
-      return;
+      return false;
     }
     if (!itemCode) {
       state.error = "商品を選択してください";
-      return;
+      return false;
     }
 
     state.error = "";
@@ -614,8 +660,10 @@ function createPosDraftStore(API_BASE) {
       closeHandyAddDialog();
       markHistoryMutated();
       await loadHistory(true);
+      return true;
     } catch (error) {
       state.error = String(error);
+      return false;
     } finally {
       state.loading = false;
     }
@@ -747,13 +795,13 @@ function createPosDraftStore(API_BASE) {
   }
 
   async function submitAddCategory() {
-    if (state.loading || !state.draftId) return;
-    if (!categoryDialog.open) return;
+    if (state.loading || !state.draftId) return false;
+    if (!categoryDialog.open) return false;
 
     const name = String(categoryDialog.name ?? "").trim();
     if (!name) {
       state.error = "カテゴリ名を入力してください";
-      return;
+      return false;
     }
 
     const cols = Number.parseInt(String(categoryDialog.cols ?? "").trim(), 10);
@@ -762,15 +810,15 @@ function createPosDraftStore(API_BASE) {
 
     if (!Number.isInteger(cols) || cols <= 0) {
       state.error = "列数は1以上の整数で入力してください";
-      return;
+      return false;
     }
     if (!Number.isInteger(rows) || rows <= 0) {
       state.error = "行数は1以上の整数で入力してください";
-      return;
+      return false;
     }
     if (!Number.isInteger(styleKey) || styleKey <= 0) {
       state.error = "styleKeyは1以上の整数で入力してください";
-      return;
+      return false;
     }
 
     state.error = "";
@@ -790,16 +838,18 @@ function createPosDraftStore(API_BASE) {
       applyHistoryFlags(data, true, false);
       closeCategoryDialog();
       await loadHistory(true);
+      return true;
     } catch (error) {
       state.error = String(error);
+      return false;
     } finally {
       state.loading = false;
     }
   }
 
   async function deleteCategoryByPage(pageNumber) {
-    if (state.loading || !state.draftId) return;
-    if (!Number.isInteger(pageNumber) || pageNumber <= 0) return;
+    if (state.loading || !state.draftId) return false;
+    if (!Number.isInteger(pageNumber) || pageNumber <= 0) return false;
 
     state.error = "";
     state.loading = true;
@@ -822,8 +872,10 @@ function createPosDraftStore(API_BASE) {
       applyHistoryFlags(data, true, false);
       closeAllDialogs();
       await loadHistory(true);
+      return true;
     } catch (error) {
       state.error = String(error);
+      return false;
     } finally {
       state.loading = false;
     }
@@ -831,14 +883,14 @@ function createPosDraftStore(API_BASE) {
 
   async function deleteSelectedCategory() {
     const pageNumber = state.selectedPageNumber;
-    if (!Number.isInteger(pageNumber) || pageNumber <= 0) return;
-    await deleteCategoryByPage(pageNumber);
+    if (!Number.isInteger(pageNumber) || pageNumber <= 0) return false;
+    return deleteCategoryByPage(pageNumber);
   }
 
   async function swapCategories(fromPageNumber, toPageNumber) {
-    if (state.loading || !state.draftId) return;
-    if (!Number.isInteger(fromPageNumber) || !Number.isInteger(toPageNumber)) return;
-    if (fromPageNumber === toPageNumber) return;
+    if (state.loading || !state.draftId) return false;
+    if (!Number.isInteger(fromPageNumber) || !Number.isInteger(toPageNumber)) return false;
+    if (fromPageNumber === toPageNumber) return false;
 
     const currentSelected = state.selectedPageNumber;
     const nextSelected =
@@ -869,8 +921,10 @@ function createPosDraftStore(API_BASE) {
       applyHistoryFlags(data, true, false);
       closeAllDialogs();
       await loadHistory(true);
+      return true;
     } catch (error) {
       state.error = String(error);
+      return false;
     } finally {
       state.loading = false;
     }
@@ -947,17 +1001,17 @@ function createPosDraftStore(API_BASE) {
   }
 
   async function submitUnitPriceUpdate() {
-    if (state.loading) return;
-    if (!priceDialog.open || !state.page || !state.draftId) return;
+    if (state.loading) return false;
+    if (!priceDialog.open || !state.page || !state.draftId) return false;
 
     const normalized = String(priceDialog.unitPrice ?? "").trim().replace(/,/g, "");
     if (!normalized) {
       state.error = "価格を入力してください";
-      return;
+      return false;
     }
     if (!/^\d+(\.\d+)?$/.test(normalized)) {
       state.error = "価格は数字で入力してください";
-      return;
+      return false;
     }
 
     state.error = "";
@@ -982,8 +1036,10 @@ function createPosDraftStore(API_BASE) {
       closePriceDialog();
       markHistoryMutated();
       await loadHistory(true);
+      return true;
     } catch (error) {
       state.error = String(error);
+      return false;
     } finally {
       state.loading = false;
     }
@@ -1013,12 +1069,12 @@ function createPosDraftStore(API_BASE) {
   }
 
   async function addButtonFromCatalog(item) {
-    if (state.loading) return;
-    if (!addDialog.open || !state.page || !state.draftId) return;
-    if (!item?.itemCode) return;
+    if (state.loading) return false;
+    if (!addDialog.open || !state.page || !state.draftId) return false;
+    if (!item?.itemCode) return false;
     if (!addDialog.categoryCode) {
       state.error = "カテゴリを選択してください";
-      return;
+      return false;
     }
 
     state.error = "";
@@ -1042,20 +1098,22 @@ function createPosDraftStore(API_BASE) {
       closeAddDialog();
       markHistoryMutated();
       await loadHistory(true);
+      return true;
     } catch (error) {
       state.error = String(error);
+      return false;
     } finally {
       state.loading = false;
     }
   }
 
   async function deleteButton(button) {
-    if (state.loading) return;
+    if (state.loading) return false;
     if (!button?.buttonId) {
       state.error = "buttonIdが見つかりません";
-      return;
+      return false;
     }
-    if (!state.page || !state.draftId) return;
+    if (!state.page || !state.draftId) return false;
 
     state.error = "";
     state.loading = true;
@@ -1075,16 +1133,18 @@ function createPosDraftStore(API_BASE) {
       }
       markHistoryMutated();
       await loadHistory(true);
+      return true;
     } catch (error) {
       state.error = String(error);
+      return false;
     } finally {
       state.loading = false;
     }
   }
 
   async function swapButtons(fromCol, fromRow, toCol, toRow) {
-    if (state.loading) return;
-    if (!state.page || !state.draftId) return;
+    if (state.loading) return false;
+    if (!state.page || !state.draftId) return false;
 
     state.error = "";
     state.loading = true;
@@ -1104,8 +1164,10 @@ function createPosDraftStore(API_BASE) {
       state.page = await res.json();
       markHistoryMutated();
       await loadHistory(true);
+      return true;
     } catch (error) {
       state.error = String(error);
+      return false;
     } finally {
       state.loading = false;
     }
@@ -1271,6 +1333,7 @@ function createPosDraftStore(API_BASE) {
     loadHandyCatalog,
     selectHandyCategory,
     swapHandyCategories,
+    reorderHandyCategories,
     reorderHandyItems,
     deleteHandyItem,
     openHandyAddDialog,

@@ -10,6 +10,22 @@ const props = defineProps({
     type: String,
     default: "",
   },
+  recentEditedCategoryCodes: {
+    type: Array,
+    default: () => [],
+  },
+  recentEditedItemKeys: {
+    type: Array,
+    default: () => [],
+  },
+  pendingDeleteCategoryCode: {
+    type: String,
+    default: "",
+  },
+  pendingDeleteItemKey: {
+    type: String,
+    default: "",
+  },
   items: {
     type: Array,
     default: () => [],
@@ -22,7 +38,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   "select-category",
-  "swap-categories",
+  "reorder-categories",
   "reorder-items",
   "delete-item",
   "open-add",
@@ -30,9 +46,50 @@ const emit = defineEmits([
   "delete-category",
 ]);
 const dragFromIndex = ref(-1);
-const dragOverIndex = ref(-1);
-const dragSourceCategoryCode = ref("");
-const dragOverCategoryCode = ref("");
+const dragInsertBeforeIndex = ref(-1);
+const dragFromCategoryIndex = ref(-1);
+const dragInsertBeforeCategoryIndex = ref(-1);
+
+function isCategoryDeletePending() {
+  return String(props.pendingDeleteCategoryCode ?? "").trim().length > 0;
+}
+
+function isItemDeletePending() {
+  return String(props.pendingDeleteItemKey ?? "").trim().length > 0;
+}
+
+function hasPendingDelete() {
+  return isCategoryDeletePending() || isItemDeletePending();
+}
+
+function isDeletingCategory(code) {
+  const normalizedCode = String(code ?? "").trim();
+  return isCategoryDeletePending() && normalizedCode === String(props.pendingDeleteCategoryCode ?? "").trim();
+}
+
+function isDeletingItem(item, index) {
+  return String(props.pendingDeleteItemKey ?? "").trim() === `${item?.itemCode}-${index}`;
+}
+
+function onSelectCategory(code) {
+  if (props.loading || hasPendingDelete()) return;
+  emit("select-category", code);
+}
+
+function onOpenAddCategory() {
+  if (props.loading || hasPendingDelete()) return;
+  emit("open-add-category");
+}
+
+function onDeleteCategory() {
+  if (props.loading || hasPendingDelete()) return;
+  emit("delete-category", selectedCategory.value?.code);
+}
+
+function onOpenAddItem() {
+  if (props.loading || hasPendingDelete()) return;
+  emit("open-add");
+}
 
 const selectedCategory = computed(
   () =>
@@ -41,53 +98,63 @@ const selectedCategory = computed(
     null,
 );
 
-function onCategoryDragStart(category, event) {
-  if (props.loading) return;
+function onCategoryDragStart(index, category, event) {
+  if (props.loading || hasPendingDelete()) return;
+  if (!Number.isInteger(index) || index < 0) return;
   const code = String(category?.code ?? "").trim();
   if (!code) return;
-  dragSourceCategoryCode.value = code;
-  dragOverCategoryCode.value = "";
+  if (isDeletingCategory(code)) return;
+  dragFromCategoryIndex.value = index;
+  dragInsertBeforeCategoryIndex.value = -1;
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", code);
+    event.dataTransfer.setData("text/plain", String(index));
   }
 }
 
-function onCategoryDragOver(category, event) {
-  if (props.loading) return;
+function onCategoryDragOver(index, category, event) {
+  if (props.loading || hasPendingDelete()) return;
+  if (dragFromCategoryIndex.value < 0) return;
   const targetCode = String(category?.code ?? "").trim();
   if (!targetCode) return;
-  if (!dragSourceCategoryCode.value || dragSourceCategoryCode.value === targetCode) return;
+  if (isDeletingCategory(targetCode)) return;
   event.preventDefault();
   if (event.dataTransfer) {
     event.dataTransfer.dropEffect = "move";
   }
-  dragOverCategoryCode.value = targetCode;
+  const insertBeforeIndex = resolveCategoryInsertBeforeIndex(index, event);
+  const toIndex = resolveCategoryTargetIndex(dragFromCategoryIndex.value, insertBeforeIndex);
+  if (!Number.isInteger(toIndex) || toIndex === dragFromCategoryIndex.value) {
+    dragInsertBeforeCategoryIndex.value = -1;
+    return;
+  }
+  dragInsertBeforeCategoryIndex.value = insertBeforeIndex;
 }
 
-function onCategoryDragLeave(category) {
-  const targetCode = String(category?.code ?? "").trim();
-  if (targetCode && dragOverCategoryCode.value === targetCode) {
-    dragOverCategoryCode.value = "";
+function onCategoryDragLeave(index) {
+  if (dragInsertBeforeCategoryIndex.value === index || dragInsertBeforeCategoryIndex.value === index + 1) {
+    dragInsertBeforeCategoryIndex.value = -1;
   }
 }
 
-function onCategoryDrop(category, event) {
-  if (props.loading) return;
+function onCategoryDrop(index, event) {
+  if (props.loading || hasPendingDelete()) return;
   event.preventDefault();
-  const targetCode = String(category?.code ?? "").trim();
-  if (!targetCode) {
+  const fromRaw = event.dataTransfer?.getData("text/plain");
+  const fromIndex = Number.parseInt(fromRaw || String(dragFromCategoryIndex.value), 10);
+  if (!Number.isInteger(fromIndex) || fromIndex < 0) {
     resetCategoryDragState();
     return;
   }
 
-  const fromRaw = event.dataTransfer?.getData("text/plain");
-  const fromCode = String(fromRaw || dragSourceCategoryCode.value || "").trim();
-  if (!fromCode || fromCode === targetCode) {
-    resetCategoryDragState();
-    return;
+  const insertBeforeIndex =
+    dragInsertBeforeCategoryIndex.value >= 0
+      ? dragInsertBeforeCategoryIndex.value
+      : resolveCategoryInsertBeforeIndex(index, event);
+  const toIndex = resolveCategoryTargetIndex(fromIndex, insertBeforeIndex);
+  if (Number.isInteger(toIndex) && toIndex >= 0 && toIndex !== fromIndex) {
+    emit("reorder-categories", { fromIndex, toIndex });
   }
-  emit("swap-categories", { fromCategoryCode: fromCode, toCategoryCode: targetCode });
   resetCategoryDragState();
 }
 
@@ -96,9 +163,9 @@ function onCategoryDragEnd() {
 }
 
 function onItemDragStart(index, event) {
-  if (props.loading) return;
+  if (props.loading || hasPendingDelete()) return;
   dragFromIndex.value = index;
-  dragOverIndex.value = -1;
+  dragInsertBeforeIndex.value = -1;
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", String(index));
@@ -106,23 +173,29 @@ function onItemDragStart(index, event) {
 }
 
 function onItemDragOver(index, event) {
-  if (props.loading) return;
+  if (props.loading || hasPendingDelete()) return;
   if (dragFromIndex.value < 0) return;
   event.preventDefault();
   if (event.dataTransfer) {
     event.dataTransfer.dropEffect = "move";
   }
-  dragOverIndex.value = index;
+  const insertBeforeIndex = resolveInsertBeforeIndex(index, event);
+  const toIndex = resolveTargetIndex(dragFromIndex.value, insertBeforeIndex);
+  if (!Number.isInteger(toIndex) || toIndex === dragFromIndex.value) {
+    dragInsertBeforeIndex.value = -1;
+    return;
+  }
+  dragInsertBeforeIndex.value = insertBeforeIndex;
 }
 
 function onItemDragLeave(index) {
-  if (dragOverIndex.value === index) {
-    dragOverIndex.value = -1;
+  if (dragInsertBeforeIndex.value === index || dragInsertBeforeIndex.value === index + 1) {
+    dragInsertBeforeIndex.value = -1;
   }
 }
 
 function onItemDrop(index, event) {
-  if (props.loading) return;
+  if (props.loading || hasPendingDelete()) return;
   event.preventDefault();
   const fromRaw = event.dataTransfer?.getData("text/plain");
   const fromIndex = Number.parseInt(fromRaw || String(dragFromIndex.value), 10);
@@ -130,8 +203,11 @@ function onItemDrop(index, event) {
     resetDragState();
     return;
   }
-  if (fromIndex !== index) {
-    emit("reorder-items", { fromIndex, toIndex: index });
+  const insertBeforeIndex =
+    dragInsertBeforeIndex.value >= 0 ? dragInsertBeforeIndex.value : resolveInsertBeforeIndex(index, event);
+  const toIndex = resolveTargetIndex(fromIndex, insertBeforeIndex);
+  if (Number.isInteger(toIndex) && toIndex >= 0 && toIndex !== fromIndex) {
+    emit("reorder-items", { fromIndex, toIndex });
   }
   resetDragState();
 }
@@ -141,19 +217,75 @@ function onItemDragEnd() {
 }
 
 function onDeleteItem(index) {
-  if (props.loading) return;
+  if (props.loading || hasPendingDelete()) return;
   if (!Number.isInteger(index) || index < 0) return;
   emit("delete-item", { index });
 }
 
+function resolveCategoryInsertBeforeIndex(index, event) {
+  const categoryCount = Array.isArray(props.categories) ? props.categories.length : 0;
+  if (!Number.isInteger(index) || index < 0 || categoryCount <= 0) {
+    return -1;
+  }
+
+  const rowElement = event?.currentTarget;
+  const rect = rowElement?.getBoundingClientRect?.();
+  if (!rect) {
+    return Math.min(index + 1, categoryCount);
+  }
+
+  const midpoint = rect.top + rect.height / 2;
+  const pointerY = Number(event?.clientY);
+  const insertBefore = Number.isFinite(pointerY) && pointerY < midpoint ? index : index + 1;
+  return Math.min(Math.max(insertBefore, 0), categoryCount);
+}
+
+function resolveCategoryTargetIndex(fromIndex, insertBeforeIndex) {
+  if (!Number.isInteger(fromIndex) || fromIndex < 0) return -1;
+  if (!Number.isInteger(insertBeforeIndex) || insertBeforeIndex < 0) return -1;
+  let toIndex = insertBeforeIndex;
+  if (insertBeforeIndex > fromIndex) {
+    toIndex -= 1;
+  }
+  return toIndex;
+}
+
+function resolveInsertBeforeIndex(index, event) {
+  const itemCount = Array.isArray(props.items) ? props.items.length : 0;
+  if (!Number.isInteger(index) || index < 0 || itemCount <= 0) {
+    return -1;
+  }
+
+  const rowElement = event?.currentTarget;
+  const rect = rowElement?.getBoundingClientRect?.();
+  if (!rect) {
+    return Math.min(index + 1, itemCount);
+  }
+
+  const midpoint = rect.top + rect.height / 2;
+  const pointerY = Number(event?.clientY);
+  const insertBefore = Number.isFinite(pointerY) && pointerY < midpoint ? index : index + 1;
+  return Math.min(Math.max(insertBefore, 0), itemCount);
+}
+
+function resolveTargetIndex(fromIndex, insertBeforeIndex) {
+  if (!Number.isInteger(fromIndex) || fromIndex < 0) return -1;
+  if (!Number.isInteger(insertBeforeIndex) || insertBeforeIndex < 0) return -1;
+  let toIndex = insertBeforeIndex;
+  if (insertBeforeIndex > fromIndex) {
+    toIndex -= 1;
+  }
+  return toIndex;
+}
+
 function resetDragState() {
   dragFromIndex.value = -1;
-  dragOverIndex.value = -1;
+  dragInsertBeforeIndex.value = -1;
 }
 
 function resetCategoryDragState() {
-  dragSourceCategoryCode.value = "";
-  dragOverCategoryCode.value = "";
+  dragFromCategoryIndex.value = -1;
+  dragInsertBeforeCategoryIndex.value = -1;
 }
 </script>
 
@@ -168,39 +300,43 @@ function resetCategoryDragState() {
             <button
               class="category-add-btn"
               type="button"
-              :disabled="loading"
+              :disabled="loading || hasPendingDelete()"
               title="カテゴリ追加"
-              @click="emit('open-add-category')"
+              @click="onOpenAddCategory"
             >
               +
             </button>
             <button
               class="category-delete-btn"
               type="button"
-              :disabled="loading || !selectedCategory?.code"
+              :disabled="loading || hasPendingDelete() || !selectedCategory?.code"
               title="選択カテゴリ削除"
-              @click="emit('delete-category', selectedCategory?.code)"
+              @click="onDeleteCategory"
             >
               ×
             </button>
           </div>
         </div>
         <ul class="category-list">
-          <li v-for="category in categories" :key="category.code">
+          <li v-for="(category, index) in categories" :key="category.code">
             <button
               class="category-btn"
               :class="{
                 active: category.code === selectedCategoryCode,
-                'drag-source': category.code === dragSourceCategoryCode,
-                'drag-over': category.code === dragOverCategoryCode,
+                'drag-source': index === dragFromCategoryIndex,
+                'drop-before': dragInsertBeforeCategoryIndex === index,
+                'drop-after-last':
+                  dragInsertBeforeCategoryIndex === categories.length && index === categories.length - 1,
+                'recent-edited': recentEditedCategoryCodes.includes(category.code),
+                'pending-delete': isDeletingCategory(category.code),
               }"
-              :disabled="loading"
-              :draggable="!loading"
-              @click="emit('select-category', category.code)"
-              @dragstart="onCategoryDragStart(category, $event)"
-              @dragover="onCategoryDragOver(category, $event)"
-              @dragleave="onCategoryDragLeave(category)"
-              @drop="onCategoryDrop(category, $event)"
+              :disabled="loading || hasPendingDelete() || isDeletingCategory(category.code)"
+              :draggable="!loading && !hasPendingDelete() && !isDeletingCategory(category.code)"
+              @click="onSelectCategory(category.code)"
+              @dragstart="onCategoryDragStart(index, category, $event)"
+              @dragover="onCategoryDragOver(index, category, $event)"
+              @dragleave="onCategoryDragLeave(index)"
+              @drop="onCategoryDrop(index, $event)"
               @dragend="onCategoryDragEnd"
             >
               {{ category.description || category.code }}
@@ -217,9 +353,9 @@ function resetCategoryDragState() {
           <button
             class="add-btn"
             type="button"
-            :disabled="loading"
+            :disabled="loading || hasPendingDelete()"
             title="商品追加"
-            @click="emit('open-add')"
+            @click="onOpenAddItem"
           >
             +
           </button>
@@ -232,9 +368,12 @@ function resetCategoryDragState() {
             class="item-row"
             :class="{
               'drag-source': index === dragFromIndex,
-              'drag-over': index === dragOverIndex,
+              'drop-before': dragInsertBeforeIndex === index,
+              'drop-after-last': dragInsertBeforeIndex === items.length && index === items.length - 1,
+              'recent-edited': recentEditedItemKeys.includes(`${item.itemCode}-${index}`),
+              'pending-delete': isDeletingItem(item, index),
             }"
-            :draggable="!loading"
+            :draggable="!loading && !hasPendingDelete() && !isDeletingItem(item, index)"
             @dragstart="onItemDragStart(index, $event)"
             @dragover="onItemDragOver(index, $event)"
             @dragleave="onItemDragLeave(index)"
@@ -247,7 +386,7 @@ function resetCategoryDragState() {
               class="remove-btn"
               type="button"
               title="商品を削除"
-              :disabled="loading"
+              :disabled="loading || hasPendingDelete() || isDeletingItem(item, index)"
               draggable="false"
               @dragstart.prevent
               @click.stop="onDeleteItem(index)"
@@ -344,6 +483,7 @@ function resetCategoryDragState() {
   padding: 7px 12px;
   font-size: 13px;
   cursor: pointer;
+  position: relative;
 }
 .category-btn.active {
   border-color: #7496d4;
@@ -353,9 +493,36 @@ function resetCategoryDragState() {
 .category-btn.drag-source {
   opacity: 0.6;
 }
-.category-btn.drag-over {
-  border-color: #4a76c8;
-  background: #edf3ff;
+.category-btn.drop-before::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -2px;
+  height: 3px;
+  background: #4a76c8;
+  border-radius: 999px;
+}
+.category-btn.drop-after-last::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 3px;
+  background: #4a76c8;
+  border-radius: 999px;
+}
+.category-btn.recent-edited {
+  border-color: #e7c66a;
+  background: #fff9ea;
+  box-shadow: inset 0 0 0 1px rgba(230, 188, 73, 0.35);
+}
+.category-btn.pending-delete {
+  border-color: #e7c66a;
+  background: #fff9ea;
+  color: transparent;
+  box-shadow: inset 0 0 0 1px rgba(230, 188, 73, 0.45);
 }
 .category-btn:disabled {
   opacity: 0.6;
@@ -417,6 +584,7 @@ function resetCategoryDragState() {
   border-bottom: 1px solid #f2f4f8;
   align-items: center;
   cursor: grab;
+  position: relative;
 }
 .item-row:last-child {
   border-bottom: none;
@@ -424,9 +592,40 @@ function resetCategoryDragState() {
 .item-row.drag-source {
   opacity: 0.55;
 }
-.item-row.drag-over {
-  background: #ecf3ff;
+.item-row.drop-before::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -2px;
+  height: 3px;
+  background: #4a76c8;
+  border-radius: 999px;
+}
+.item-row.drop-after-last::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 3px;
+  background: #4a76c8;
+  border-radius: 999px;
+}
+.item-row.recent-edited {
+  background: #fff9ea;
   border-radius: 6px;
+}
+.item-row.pending-delete {
+  background: #fff9ea;
+  border-radius: 6px;
+}
+.item-row.pending-delete .item-code,
+.item-row.pending-delete .item-name {
+  color: transparent;
+}
+.item-row.pending-delete .remove-btn {
+  visibility: hidden;
 }
 .item-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

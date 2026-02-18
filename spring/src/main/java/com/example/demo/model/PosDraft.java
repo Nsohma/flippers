@@ -720,6 +720,38 @@ public class PosDraft implements Serializable {
         }
     }
 
+    public static class ReorderHandyCategoriesChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final int fromIndex;
+        private final int toIndex;
+
+        public ReorderHandyCategoriesChange(int fromIndex, int toIndex) {
+            this.fromIndex = fromIndex;
+            this.toIndex = toIndex;
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            return config;
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return config;
+        }
+
+        @Override
+        public ItemCatalog applyHandyCatalog(ItemCatalog handyCatalog) {
+            return reorderHandyCategoriesByIndex(handyCatalog, fromIndex, toIndex);
+        }
+
+        @Override
+        public ItemCatalog undoHandyCatalog(ItemCatalog handyCatalog) {
+            return reorderHandyCategoriesByIndex(handyCatalog, toIndex, fromIndex);
+        }
+    }
+
     public static class SwapHandyCategoriesChange implements Change {
         private static final long serialVersionUID = 1L;
 
@@ -855,6 +887,31 @@ public class PosDraft implements Serializable {
         List<ItemCatalog.Category> categories = new ArrayList<>(handyCatalog.getCategories());
         int categoryIndex = findHandyCategoryIndex(categories, categoryCode);
         categories.remove(categoryIndex);
+        return new ItemCatalog(categories);
+    }
+
+    private static ItemCatalog reorderHandyCategoriesByIndex(
+            ItemCatalog handyCatalog,
+            int fromIndex,
+            int toIndex
+    ) {
+        if (handyCatalog == null) {
+            throw new IllegalStateException("handy catalog is not loaded");
+        }
+
+        List<ItemCatalog.Category> categories = new ArrayList<>(handyCatalog.getCategories());
+        if (fromIndex < 0 || fromIndex >= categories.size()) {
+            throw new IllegalArgumentException("fromIndex out of range: " + fromIndex);
+        }
+        if (toIndex < 0 || toIndex >= categories.size()) {
+            throw new IllegalArgumentException("toIndex out of range: " + toIndex);
+        }
+        if (fromIndex == toIndex) {
+            return handyCatalog;
+        }
+
+        ItemCatalog.Category moved = categories.remove(fromIndex);
+        categories.add(toIndex, moved);
         return new ItemCatalog(categories);
     }
 

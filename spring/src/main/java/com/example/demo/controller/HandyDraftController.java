@@ -3,6 +3,7 @@ package com.example.demo.controller;
 import com.example.demo.controller.dto.AddHandyCategoryRequest;
 import com.example.demo.controller.dto.AddHandyItemRequest;
 import com.example.demo.controller.dto.ItemCatalogResponse;
+import com.example.demo.controller.dto.ReorderHandyCategoriesRequest;
 import com.example.demo.controller.dto.ReorderHandyItemsRequest;
 import com.example.demo.controller.dto.SwapHandyCategoriesRequest;
 import com.example.demo.service.AddHandyCategoryUseCase;
@@ -11,6 +12,7 @@ import com.example.demo.service.DeleteHandyCategoryUseCase;
 import com.example.demo.service.AddHandyItemUseCase;
 import com.example.demo.service.DeleteHandyItemUseCase;
 import com.example.demo.service.GetHandyCatalogUseCase;
+import com.example.demo.service.ReorderHandyCategoriesUseCase;
 import com.example.demo.service.ReorderHandyItemsUseCase;
 import com.example.demo.service.SwapHandyCategoriesUseCase;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -32,6 +34,7 @@ public class HandyDraftController {
     private final AddHandyCategoryUseCase addHandyCategoryUseCase;
     private final DeleteHandyCategoryUseCase deleteHandyCategoryUseCase;
     private final SwapHandyCategoriesUseCase swapHandyCategoriesUseCase;
+    private final ReorderHandyCategoriesUseCase reorderHandyCategoriesUseCase;
     private final ReorderHandyItemsUseCase reorderHandyItemsUseCase;
     private final AddHandyItemUseCase addHandyItemUseCase;
     private final DeleteHandyItemUseCase deleteHandyItemUseCase;
@@ -41,6 +44,7 @@ public class HandyDraftController {
             AddHandyCategoryUseCase addHandyCategoryUseCase,
             DeleteHandyCategoryUseCase deleteHandyCategoryUseCase,
             SwapHandyCategoriesUseCase swapHandyCategoriesUseCase,
+            ReorderHandyCategoriesUseCase reorderHandyCategoriesUseCase,
             ReorderHandyItemsUseCase reorderHandyItemsUseCase,
             AddHandyItemUseCase addHandyItemUseCase,
             DeleteHandyItemUseCase deleteHandyItemUseCase
@@ -49,6 +53,7 @@ public class HandyDraftController {
         this.addHandyCategoryUseCase = addHandyCategoryUseCase;
         this.deleteHandyCategoryUseCase = deleteHandyCategoryUseCase;
         this.swapHandyCategoriesUseCase = swapHandyCategoriesUseCase;
+        this.reorderHandyCategoriesUseCase = reorderHandyCategoriesUseCase;
         this.reorderHandyItemsUseCase = reorderHandyItemsUseCase;
         this.addHandyItemUseCase = addHandyItemUseCase;
         this.deleteHandyItemUseCase = deleteHandyItemUseCase;
@@ -99,6 +104,25 @@ public class HandyDraftController {
                 draftId,
                 req.fromCategoryCode,
                 req.toCategoryCode
+        );
+        return toItemCatalogResponse(updatedCatalog);
+    }
+
+    @PatchMapping("/reorder")
+    public ItemCatalogResponse reorderHandyCategories(
+            @PathVariable String draftId,
+            @RequestBody ReorderHandyCategoriesRequest req
+    ) {
+        if (req == null) {
+            throw new IllegalArgumentException("request body is required");
+        }
+        if (req.fromIndex == null || req.toIndex == null) {
+            throw new IllegalArgumentException("fromIndex and toIndex are required");
+        }
+        ItemCatalog updatedCatalog = reorderHandyCategoriesUseCase.reorder(
+                draftId,
+                req.fromIndex,
+                req.toIndex
         );
         return toItemCatalogResponse(updatedCatalog);
     }

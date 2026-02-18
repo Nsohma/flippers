@@ -6,6 +6,14 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  recentEditedPageNumbers: {
+    type: Array,
+    default: () => [],
+  },
+  pendingDeletePageNumber: {
+    type: Number,
+    default: null,
+  },
   selectedPageNumber: {
     type: Number,
     default: null,
@@ -27,8 +35,22 @@ const dragSourcePageNumber = ref(null);
 const dragOverPageNumber = ref(null);
 const trashOver = ref(false);
 
+function isDeletingCategory(pageNumber) {
+  return props.pendingDeletePageNumber === pageNumber;
+}
+
+function hasPendingDelete() {
+  return Number.isInteger(props.pendingDeletePageNumber) && props.pendingDeletePageNumber > 0;
+}
+
+function onSelectPage(pageNumber) {
+  if (props.loading || hasPendingDelete()) return;
+  emit("select-page", pageNumber);
+}
+
 function onTabDragStart(category, event) {
-  if (props.loading) return;
+  if (props.loading || hasPendingDelete()) return;
+  if (isDeletingCategory(category.pageNumber)) return;
   dragSourcePageNumber.value = category.pageNumber;
   dragOverPageNumber.value = null;
   if (event.dataTransfer) {
@@ -38,7 +60,8 @@ function onTabDragStart(category, event) {
 }
 
 function onTabDragOver(category, event) {
-  if (props.loading) return;
+  if (props.loading || hasPendingDelete()) return;
+  if (isDeletingCategory(category.pageNumber)) return;
   if (dragSourcePageNumber.value == null) return;
   if (dragSourcePageNumber.value === category.pageNumber) return;
   event.preventDefault();
@@ -49,7 +72,8 @@ function onTabDragOver(category, event) {
 }
 
 function onTabDrop(category, event) {
-  if (props.loading) return;
+  if (props.loading || hasPendingDelete()) return;
+  if (isDeletingCategory(category.pageNumber)) return;
   event.preventDefault();
 
   const fromRaw = event.dataTransfer?.getData("text/plain");
@@ -80,7 +104,7 @@ function onTabDragEnd() {
 }
 
 function onTrashDragOver(event) {
-  if (props.loading) return;
+  if (props.loading || hasPendingDelete()) return;
   if (dragSourcePageNumber.value == null) return;
   event.preventDefault();
   if (event.dataTransfer) {
@@ -94,7 +118,7 @@ function onTrashDragLeave() {
 }
 
 function onTrashDrop(event) {
-  if (props.loading) return;
+  if (props.loading || hasPendingDelete()) return;
   event.preventDefault();
   const fromRaw = event.dataTransfer?.getData("text/plain");
   const fromPageNumber = Number.parseInt(fromRaw || String(dragSourcePageNumber.value ?? ""), 10);
@@ -125,9 +149,11 @@ function resetDragState() {
             active: category.pageNumber === selectedPageNumber,
             'drag-source': category.pageNumber === dragSourcePageNumber,
             'drag-over': category.pageNumber === dragOverPageNumber,
+            'recent-edited': recentEditedPageNumbers.includes(category.pageNumber),
+            'pending-delete': isDeletingCategory(category.pageNumber),
           }"
-          :draggable="!loading"
-          @click="emit('select-page', category.pageNumber)"
+          :draggable="!loading && !hasPendingDelete() && !isDeletingCategory(category.pageNumber)"
+          @click="onSelectPage(category.pageNumber)"
           @dragstart="onTabDragStart(category, $event)"
           @dragover="onTabDragOver(category, $event)"
           @dragleave="onTabDragLeave(category)"
@@ -143,7 +169,7 @@ function resetDragState() {
           class="trash-drop"
           type="button"
           :class="{ 'trash-over': trashOver }"
-          :disabled="loading"
+          :disabled="loading || hasPendingDelete()"
           title="カテゴリをここにドロップして削除"
           @click="emit('delete-category')"
           @dragover="onTrashDragOver"
@@ -153,7 +179,7 @@ function resetDragState() {
           🗑
         </button>
 
-        <button class="category-add-btn" :disabled="loading" @click="emit('add-category')">
+        <button class="category-add-btn" :disabled="loading || hasPendingDelete()" @click="emit('add-category')">
           + カテゴリ追加
         </button>
       </div>
@@ -208,6 +234,17 @@ function resetDragState() {
 .tab.drag-over {
   border-color: #4a76c8;
   background: #edf3ff;
+}
+.tab.recent-edited {
+  border-color: #e7c66a;
+  background: #fff9ea;
+  box-shadow: inset 0 0 0 1px rgba(230, 188, 73, 0.35);
+}
+.tab.pending-delete {
+  border-color: #e7c66a;
+  background: #fff9ea;
+  color: transparent;
+  box-shadow: inset 0 0 0 1px rgba(230, 188, 73, 0.45);
 }
 .category-add-btn {
   border: 1px solid #ccc;

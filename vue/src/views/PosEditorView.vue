@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import { usePosDraft } from "../composables/usePosDraft";
 import { useDragDrop } from "../composables/useDragDrop";
 import CategoryTabs from "../components/pos/CategoryTabs.vue";
@@ -36,7 +36,6 @@ const {
   closeGridDialog,
   openCategoryDialog,
   submitAddCategory,
-  deleteSelectedCategory,
   deleteCategoryByPage,
   swapCategories,
   openGridDialog,
@@ -54,9 +53,141 @@ const {
 } = usePosDraft(API_BASE);
 
 const loadingRef = computed(() => state.loading);
+const DELETE_PENDING_MS = 500;
+const recentEditedKeys = ref([]);
+let recentEditedTimerId = null;
+const recentEditedCategoryPages = ref([]);
+let recentEditedCategoryTimerId = null;
+const pendingDeleteCategoryPage = ref(null);
+let pendingDeleteCategoryTimerId = null;
 const selectedCategoryName = computed(() => {
   if (!Number.isInteger(state.selectedPageNumber)) return "";
   return state.categories.find((category) => category.pageNumber === state.selectedPageNumber)?.name ?? "";
+});
+
+function markRecentEdited(keys) {
+  const normalized = Array.from(new Set(keys.filter((key) => typeof key === "string" && key.trim().length > 0)));
+  recentEditedKeys.value = normalized;
+  if (recentEditedTimerId != null) {
+    window.clearTimeout(recentEditedTimerId);
+  }
+  if (!normalized.length) {
+    recentEditedTimerId = null;
+    return;
+  }
+  recentEditedTimerId = window.setTimeout(() => {
+    recentEditedKeys.value = [];
+    recentEditedTimerId = null;
+  }, 1500);
+}
+
+function markRecentEditedCategories(pageNumbers) {
+  const normalized = Array.from(
+    new Set(pageNumbers.filter((pageNumber) => Number.isInteger(pageNumber) && pageNumber > 0)),
+  );
+  recentEditedCategoryPages.value = normalized;
+  if (recentEditedCategoryTimerId != null) {
+    window.clearTimeout(recentEditedCategoryTimerId);
+  }
+  if (!normalized.length) {
+    recentEditedCategoryTimerId = null;
+    return;
+  }
+  recentEditedCategoryTimerId = window.setTimeout(() => {
+    recentEditedCategoryPages.value = [];
+    recentEditedCategoryTimerId = null;
+  }, 1500);
+}
+
+async function swapButtonsWithHighlight(fromCol, fromRow, toCol, toRow) {
+  const success = await swapButtons(fromCol, fromRow, toCol, toRow);
+  if (!success) return;
+  markRecentEdited([`${fromCol}-${fromRow}`, `${toCol}-${toRow}`]);
+}
+
+async function submitAddCategoryWithHighlight() {
+  const success = await submitAddCategory();
+  if (!success) return;
+  markRecentEditedCategories([state.selectedPageNumber]);
+}
+
+function clearPendingCategoryDelete() {
+  if (pendingDeleteCategoryTimerId != null) {
+    window.clearTimeout(pendingDeleteCategoryTimerId);
+    pendingDeleteCategoryTimerId = null;
+  }
+  pendingDeleteCategoryPage.value = null;
+}
+
+function queueCategoryDelete(pageNumber) {
+  const targetPageNumber = Number.parseInt(String(pageNumber ?? ""), 10);
+  if (!Number.isInteger(targetPageNumber) || targetPageNumber <= 0) return;
+  if (pendingDeleteCategoryTimerId != null) return;
+  if (!state.categories.some((category) => category.pageNumber === targetPageNumber)) return;
+
+  const requestedDraftId = state.draftId;
+  pendingDeleteCategoryPage.value = targetPageNumber;
+  markRecentEditedCategories([]);
+  pendingDeleteCategoryTimerId = window.setTimeout(async () => {
+    pendingDeleteCategoryTimerId = null;
+    try {
+      if (!requestedDraftId || state.draftId !== requestedDraftId) return;
+      await deleteCategoryByPage(targetPageNumber);
+    } finally {
+      pendingDeleteCategoryPage.value = null;
+    }
+  }, DELETE_PENDING_MS);
+}
+
+function deleteCategoryByPageWithHighlight(pageNumber) {
+  queueCategoryDelete(pageNumber);
+}
+
+function deleteSelectedCategoryWithHighlight() {
+  queueCategoryDelete(state.selectedPageNumber);
+}
+
+async function swapCategoriesWithHighlight(fromPageNumber, toPageNumber) {
+  const success = await swapCategories(fromPageNumber, toPageNumber);
+  if (!success) return;
+  markRecentEditedCategories([fromPageNumber, toPageNumber]);
+}
+
+async function addButtonWithHighlight(item) {
+  const targetKey = `${addDialog.targetCol}-${addDialog.targetRow}`;
+  const success = await addButtonFromCatalog(item);
+  if (!success) return;
+  markRecentEdited([targetKey]);
+}
+
+async function deleteButtonWithHighlight(button) {
+  const targetKey = `${button?.col}-${button?.row}`;
+  const success = await deleteButton(button);
+  if (!success) return;
+  markRecentEdited([targetKey]);
+}
+
+async function submitUnitPriceUpdateWithHighlight() {
+  const targetButton = state.page?.buttons?.find((button) => button.buttonId === priceDialog.buttonId) ?? null;
+  const targetKey = targetButton ? `${targetButton.col}-${targetButton.row}` : "";
+  const success = await submitUnitPriceUpdate();
+  if (!success || !targetKey) return;
+  markRecentEdited([targetKey]);
+}
+
+onBeforeUnmount(() => {
+  if (recentEditedTimerId != null) {
+    window.clearTimeout(recentEditedTimerId);
+    recentEditedTimerId = null;
+  }
+  if (recentEditedCategoryTimerId != null) {
+    window.clearTimeout(recentEditedCategoryTimerId);
+    recentEditedCategoryTimerId = null;
+  }
+  if (pendingDeleteCategoryTimerId != null) {
+    window.clearTimeout(pendingDeleteCategoryTimerId);
+    pendingDeleteCategoryTimerId = null;
+  }
 });
 
 const {
@@ -69,11 +200,12 @@ const {
 } = useDragDrop({
   loadingRef,
   getSourceButton: (key) => buttonMap.value.get(key),
-  onSwap: ({ fromCol, fromRow, toCol, toRow }) => swapButtons(fromCol, fromRow, toCol, toRow),
+  onSwap: ({ fromCol, fromRow, toCol, toRow }) => swapButtonsWithHighlight(fromCol, fromRow, toCol, toRow),
 });
 
 async function onImportClick() {
   const file = fileRef.value?.files?.[0];
+  clearPendingCategoryDelete();
   await importExcel(file);
 }
 </script>
@@ -110,25 +242,28 @@ async function onImportClick() {
     <CategoryTabs
       v-if="state.draftId"
       :categories="state.categories"
+      :recent-edited-page-numbers="recentEditedCategoryPages"
+      :pending-delete-page-number="pendingDeleteCategoryPage"
       :selected-page-number="state.selectedPageNumber"
       :loading="state.loading"
       @select-page="loadPage"
-      @swap-categories="({ fromPageNumber, toPageNumber }) => swapCategories(fromPageNumber, toPageNumber)"
-      @delete-category-page="({ pageNumber }) => deleteCategoryByPage(pageNumber)"
+      @swap-categories="({ fromPageNumber, toPageNumber }) => swapCategoriesWithHighlight(fromPageNumber, toPageNumber)"
+      @delete-category-page="({ pageNumber }) => deleteCategoryByPageWithHighlight(pageNumber)"
       @add-category="openCategoryDialog"
-      @delete-category="deleteSelectedCategory"
+      @delete-category="deleteSelectedCategoryWithHighlight"
     />
 
     <ButtonGrid
       :page="state.page"
       :grid-cells="gridCells"
+      :recent-edited-keys="recentEditedKeys"
       :loading="state.loading"
       :drag-state="dragState"
       :button-class="buttonClass"
       :format-price="formatPrice"
       @edit-grid="openGridDialog"
       @open-add="openAddDialog"
-      @delete-button="deleteButton"
+      @delete-button="deleteButtonWithHighlight"
       @open-price="openPriceDialog"
       @button-drag-start="onButtonDragStart"
       @cell-drag-over="onCellDragOver"
@@ -150,7 +285,7 @@ async function onImportClick() {
       @close="closeAddDialog"
       @update:category-code="addDialog.categoryCode = $event"
       @update:search="addDialog.search = $event"
-      @select-item="addButtonFromCatalog"
+      @select-item="addButtonWithHighlight"
     />
 
     <PriceDialog
@@ -160,7 +295,7 @@ async function onImportClick() {
       :item-code="priceDialog.itemCode"
       :unit-price="priceDialog.unitPrice"
       @close="closePriceDialog"
-      @submit="submitUnitPriceUpdate"
+      @submit="submitUnitPriceUpdateWithHighlight"
       @update:unit-price="priceDialog.unitPrice = $event"
     />
 
@@ -172,7 +307,7 @@ async function onImportClick() {
       :rows="categoryDialog.rows"
       :style-key="categoryDialog.styleKey"
       @close="closeCategoryDialog"
-      @submit="submitAddCategory"
+      @submit="submitAddCategoryWithHighlight"
       @update:name="categoryDialog.name = $event"
       @update:cols="categoryDialog.cols = $event"
       @update:rows="categoryDialog.rows = $event"

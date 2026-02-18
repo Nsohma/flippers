@@ -8,6 +8,10 @@ defineProps({
     type: Array,
     default: () => [],
   },
+  recentEditedKeys: {
+    type: Array,
+    default: () => [],
+  },
   loading: {
     type: Boolean,
     default: false,
@@ -64,6 +68,7 @@ const emit = defineEmits([
           'has-button': !!cell.button,
           'drag-source': dragState.sourceKey === cell.key,
           'drag-over': dragState.overKey === cell.key,
+          'recent-edited': recentEditedKeys.includes(cell.key),
         }"
         @dragover="emit('cell-drag-over', cell, $event)"
         @dragleave="emit('cell-drag-leave', cell)"
@@ -270,6 +275,15 @@ const emit = defineEmits([
 .drag-over {
   background: #eef3ff;
   border-color: #9cb1ff;
+}
+.recent-edited {
+  background: #fff9ea;
+  border-color: #e7c66a;
+  box-shadow: inset 0 0 0 1px rgba(230, 188, 73, 0.35);
+}
+.recent-edited .cell-btn {
+  background: #fffef6;
+  border-color: #e7c66a;
 }
 .label {
   font-weight: 700;
