@@ -1,14 +1,12 @@
 package com.example.demo.controller;
 
 import com.example.demo.controller.dto.AddButtonRequest;
-import com.example.demo.controller.dto.AddHandyItemRequest;
 import com.example.demo.controller.dto.AddCategoryRequest;
 import com.example.demo.controller.dto.CategoryStateResponse;
 import com.example.demo.controller.dto.DeleteButtonRequest;
 import com.example.demo.controller.dto.DraftHistoryResponse;
 import com.example.demo.controller.dto.ItemCatalogResponse;
 import com.example.demo.controller.dto.PageResponse;
-import com.example.demo.controller.dto.ReorderHandyItemsRequest;
 import com.example.demo.controller.dto.SwapButtonsRequest;
 import com.example.demo.controller.dto.SwapCategoriesRequest;
 import com.example.demo.controller.dto.UpdateCategoryGridRequest;
@@ -17,20 +15,16 @@ import com.example.demo.model.ItemCatalog;
 import com.example.demo.model.PosConfig;
 import com.example.demo.model.PosDraft;
 import com.example.demo.service.AddButtonUseCase;
-import com.example.demo.service.AddHandyItemUseCase;
 import com.example.demo.service.AddCategoryUseCase;
 import com.example.demo.service.ClearDraftHistoryUseCase;
 import com.example.demo.service.DeleteButtonUseCase;
-import com.example.demo.service.DeleteHandyItemUseCase;
 import com.example.demo.service.DeleteCategoryUseCase;
 import com.example.demo.service.ExportPosUseCase;
 import com.example.demo.service.GetDraftHistoryUseCase;
-import com.example.demo.service.GetHandyCatalogUseCase;
 import com.example.demo.service.GetPageUseCase;
 import com.example.demo.service.GetItemCatalogUseCase;
 import com.example.demo.service.JumpDraftHistoryUseCase;
 import com.example.demo.service.RedoDraftUseCase;
-import com.example.demo.service.ReorderHandyItemsUseCase;
 import com.example.demo.service.SwapButtonsUseCase;
 import com.example.demo.service.SwapCategoriesUseCase;
 import com.example.demo.service.UndoDraftUseCase;
@@ -54,10 +48,6 @@ public class PosDraftController {
     private final ClearDraftHistoryUseCase clearDraftHistoryUseCase;
     private final SwapButtonsUseCase swapButtonsUseCase;
     private final GetItemCatalogUseCase getItemCatalogUseCase;
-    private final GetHandyCatalogUseCase getHandyCatalogUseCase;
-    private final ReorderHandyItemsUseCase reorderHandyItemsUseCase;
-    private final AddHandyItemUseCase addHandyItemUseCase;
-    private final DeleteHandyItemUseCase deleteHandyItemUseCase;
     private final AddButtonUseCase addButtonUseCase;
     private final DeleteButtonUseCase deleteButtonUseCase;
     private final UpdateUnitPriceUseCase updateUnitPriceUseCase;
@@ -76,10 +66,6 @@ public class PosDraftController {
             ClearDraftHistoryUseCase clearDraftHistoryUseCase,
             SwapButtonsUseCase swapButtonsUseCase,
             GetItemCatalogUseCase getItemCatalogUseCase,
-            GetHandyCatalogUseCase getHandyCatalogUseCase,
-            ReorderHandyItemsUseCase reorderHandyItemsUseCase,
-            AddHandyItemUseCase addHandyItemUseCase,
-            DeleteHandyItemUseCase deleteHandyItemUseCase,
             AddButtonUseCase addButtonUseCase,
             DeleteButtonUseCase deleteButtonUseCase,
             UpdateUnitPriceUseCase updateUnitPriceUseCase,
@@ -97,10 +83,6 @@ public class PosDraftController {
         this.clearDraftHistoryUseCase = clearDraftHistoryUseCase;
         this.swapButtonsUseCase = swapButtonsUseCase;
         this.getItemCatalogUseCase = getItemCatalogUseCase;
-        this.getHandyCatalogUseCase = getHandyCatalogUseCase;
-        this.reorderHandyItemsUseCase = reorderHandyItemsUseCase;
-        this.addHandyItemUseCase = addHandyItemUseCase;
-        this.deleteHandyItemUseCase = deleteHandyItemUseCase;
         this.addButtonUseCase = addButtonUseCase;
         this.deleteButtonUseCase = deleteButtonUseCase;
         this.updateUnitPriceUseCase = updateUnitPriceUseCase;
@@ -166,65 +148,6 @@ public class PosDraftController {
     public ItemCatalogResponse getItemCategories(@PathVariable String draftId) {
         ItemCatalog catalog = getItemCatalogUseCase.getItemCatalog(draftId);
         return toItemCatalogResponse(catalog);
-    }
-
-    @GetMapping("/{draftId}/handy-categories")
-    public ItemCatalogResponse getHandyCategories(@PathVariable String draftId) {
-        ItemCatalog catalog = getHandyCatalogUseCase.getHandyCatalog(draftId);
-        return toItemCatalogResponse(catalog);
-    }
-
-    @PatchMapping("/{draftId}/handy-categories/{categoryCode}/items/reorder")
-    public ItemCatalogResponse reorderHandyItems(
-            @PathVariable String draftId,
-            @PathVariable String categoryCode,
-            @RequestBody ReorderHandyItemsRequest req
-    ) {
-        if (req == null) {
-            throw new IllegalArgumentException("request body is required");
-        }
-        if (req.fromIndex == null || req.toIndex == null) {
-            throw new IllegalArgumentException("fromIndex and toIndex are required");
-        }
-        ItemCatalog updatedCatalog = reorderHandyItemsUseCase.reorder(
-                draftId,
-                categoryCode,
-                req.fromIndex,
-                req.toIndex
-        );
-        return toItemCatalogResponse(updatedCatalog);
-    }
-
-    @DeleteMapping("/{draftId}/handy-categories/{categoryCode}/items/{itemIndex}")
-    public ItemCatalogResponse deleteHandyItem(
-            @PathVariable String draftId,
-            @PathVariable String categoryCode,
-            @PathVariable int itemIndex
-    ) {
-        ItemCatalog updatedCatalog = deleteHandyItemUseCase.delete(
-                draftId,
-                categoryCode,
-                itemIndex
-        );
-        return toItemCatalogResponse(updatedCatalog);
-    }
-
-    @PostMapping("/{draftId}/handy-categories/{categoryCode}/items")
-    public ItemCatalogResponse addHandyItem(
-            @PathVariable String draftId,
-            @PathVariable String categoryCode,
-            @RequestBody AddHandyItemRequest req
-    ) {
-        if (req == null) {
-            throw new IllegalArgumentException("request body is required");
-        }
-        ItemCatalog updatedCatalog = addHandyItemUseCase.add(
-                draftId,
-                categoryCode,
-                req.sourceCategoryCode,
-                req.itemCode
-        );
-        return toItemCatalogResponse(updatedCatalog);
     }
 
     @PostMapping("/{draftId}/pages/{pageNumber}/buttons")

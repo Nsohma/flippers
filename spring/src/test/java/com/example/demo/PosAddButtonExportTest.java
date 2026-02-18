@@ -358,6 +358,74 @@ class PosAddButtonExportTest {
         assertEquals(target.item().getItemName(), afterName, "ItemCategoryMaster name column was not updated");
     }
 
+    @Test
+    void export_adds_category_master_row_when_handy_category_added() throws Exception {
+        byte[] originalBytes = Files.readAllBytes(ORIGINAL);
+
+        PoiPosConfigReader reader = new PoiPosConfigReader();
+        PosConfigSource source = reader.read(new ByteArrayInputStream(originalBytes));
+        PosConfig config = PosConfig.fromSource(source);
+        ItemCatalog handyCatalog = source.getHandyCatalog();
+
+        String newCategoryCode = "TEST_HANDY_CATEGORY_ADD";
+        while (handyCatalog.findCategory(newCategoryCode) != null) {
+            newCategoryCode = newCategoryCode + "_X";
+        }
+        String newCategoryDescription = "TEST Handy Category Add";
+
+        List<ItemCatalog.Category> updatedCategories = new ArrayList<>(handyCatalog.getCategories());
+        updatedCategories.add(new ItemCatalog.Category(newCategoryCode, newCategoryDescription, List.of()));
+        ItemCatalog updatedHandyCatalog = new ItemCatalog(updatedCategories);
+
+        PoiPosConfigExporter exporter = new PoiPosConfigExporter();
+        byte[] exported = exporter.export(originalBytes, config, updatedHandyCatalog);
+
+        assertEquals(0, countCategoryMasterRows(originalBytes, newCategoryCode));
+        assertEquals(1, countCategoryMasterRows(exported, newCategoryCode));
+        assertEquals(
+                updatedCategories.size(),
+                readCategoryMasterDisplayLevel(exported, newCategoryCode),
+                "CategoryMaster.DisplayLevel was not assigned in handy order"
+        );
+    }
+
+    @Test
+    void export_deletes_category_master_row_when_handy_category_deleted() throws Exception {
+        byte[] originalBytes = Files.readAllBytes(ORIGINAL);
+
+        PoiPosConfigReader reader = new PoiPosConfigReader();
+        PosConfigSource source = reader.read(new ByteArrayInputStream(originalBytes));
+        PosConfig config = PosConfig.fromSource(source);
+        ItemCatalog handyCatalog = source.getHandyCatalog();
+
+        assertFalse(handyCatalog.getCategories().isEmpty(), "handy category is empty");
+        ItemCatalog.Category targetCategory = handyCatalog.getCategories().get(0);
+        String targetCode = targetCategory.getCode();
+
+        int beforeCategoryRows = countCategoryMasterRows(originalBytes, targetCode);
+        int beforeItemRows = countItemCategoryRowsByCategory(originalBytes, targetCode);
+        assertTrue(beforeCategoryRows > 0, "target category does not exist in CategoryMaster: " + targetCode);
+
+        List<ItemCatalog.Category> updatedCategories = new ArrayList<>();
+        for (ItemCatalog.Category category : handyCatalog.getCategories()) {
+            if (!targetCode.equals(category.getCode())) {
+                updatedCategories.add(category);
+            }
+        }
+        ItemCatalog updatedHandyCatalog = new ItemCatalog(updatedCategories);
+
+        PoiPosConfigExporter exporter = new PoiPosConfigExporter();
+        byte[] exported = exporter.export(originalBytes, config, updatedHandyCatalog);
+
+        assertEquals(0, countCategoryMasterRows(exported, targetCode), "CategoryMaster row was not deleted");
+        assertEquals(
+                0,
+                countItemCategoryRowsByCategory(exported, targetCode),
+                "ItemCategoryMaster rows were not deleted for removed handy category"
+        );
+        assertTrue(beforeItemRows >= 0, "before item rows should be non-negative");
+    }
+
     private static TargetCell findFirstEmptyCell(PosConfig config) {
         for (PosConfig.Category category : config.getCategories()) {
             PosConfig.Page page = config.getPage(category.getPageNumber());
@@ -737,6 +805,117 @@ class PosAddButtonExportTest {
                 String rowCategoryCode = formatter.formatCellValue(row.getCell(hCategoryCode)).trim();
                 String rowItemCode = formatter.formatCellValue(row.getCell(hItemCode)).trim();
                 if (categoryCode.equals(rowCategoryCode) && itemCode.equals(rowItemCode)) {
+                    count += 1;
+                }
+            }
+        }
+        return count;
+    }
+
+    private static int countCategoryMasterRows(byte[] bytes, String categoryCode) throws Exception {
+        int count = 0;
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            Sheet sheet = wb.getSheet("CategoryMaster");
+            assertNotNull(sheet, "CategoryMaster sheet not found");
+
+            DataFormatter formatter = new DataFormatter();
+            int headerRowIndex = findHeaderRowIndex(sheet, formatter, "CategoryCode");
+            assertTrue(headerRowIndex >= 0, "CategoryMaster header row not found");
+            Row headerRow = sheet.getRow(headerRowIndex);
+            assertNotNull(headerRow, "CategoryMaster header row not found");
+
+            Map<String, Integer> headerIndex = toHeaderIndexMap(headerRow, formatter);
+            int hCategoryCode = requireColumn(headerIndex, "CategoryCode");
+
+            for (int r = headerRowIndex + 1; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+                String rowCategoryCode = formatter.formatCellValue(row.getCell(hCategoryCode)).trim();
+                if (categoryCode.equals(rowCategoryCode)) {
+                    count += 1;
+                }
+            }
+        }
+        return count;
+    }
+
+    private static int readCategoryMasterDisplayLevel(byte[] bytes, String categoryCode) throws Exception {
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            Sheet sheet = wb.getSheet("CategoryMaster");
+            assertNotNull(sheet, "CategoryMaster sheet not found");
+
+            DataFormatter formatter = new DataFormatter();
+            int headerRowIndex = findHeaderRowIndex(sheet, formatter, "CategoryCode");
+            assertTrue(headerRowIndex >= 0, "CategoryMaster header row not found");
+            Row headerRow = sheet.getRow(headerRowIndex);
+            assertNotNull(headerRow, "CategoryMaster header row not found");
+
+            Map<String, Integer> headerIndex = toHeaderIndexMap(headerRow, formatter);
+            int hCategoryCode = requireColumn(headerIndex, "CategoryCode");
+            int hDisplayLevel = requireColumn(headerIndex, "DisplayLevel");
+
+            for (int r = headerRowIndex + 1; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+                String rowCategoryCode = formatter.formatCellValue(row.getCell(hCategoryCode)).trim();
+                if (!categoryCode.equals(rowCategoryCode)) continue;
+                String displayLevel = formatter.formatCellValue(row.getCell(hDisplayLevel)).trim();
+                assertFalse(displayLevel.isEmpty(), "DisplayLevel is empty");
+                return toInt(displayLevel);
+            }
+        }
+        fail("category row not found in CategoryMaster: " + categoryCode);
+        return -1;
+    }
+
+    private static String readCategoryMasterDescription(byte[] bytes, String categoryCode) throws Exception {
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            Sheet sheet = wb.getSheet("CategoryMaster");
+            assertNotNull(sheet, "CategoryMaster sheet not found");
+
+            DataFormatter formatter = new DataFormatter();
+            int headerRowIndex = findHeaderRowIndex(sheet, formatter, "CategoryCode");
+            assertTrue(headerRowIndex >= 0, "CategoryMaster header row not found");
+            Row headerRow = sheet.getRow(headerRowIndex);
+            assertNotNull(headerRow, "CategoryMaster header row not found");
+
+            Map<String, Integer> headerIndex = toHeaderIndexMap(headerRow, formatter);
+            int hCategoryCode = requireColumn(headerIndex, "CategoryCode");
+            int hDisplayLevel = requireColumn(headerIndex, "DisplayLevel");
+            int hDescription = headerIndex.getOrDefault("Description", hDisplayLevel + 1);
+
+            for (int r = headerRowIndex + 1; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+                String rowCategoryCode = formatter.formatCellValue(row.getCell(hCategoryCode)).trim();
+                if (!categoryCode.equals(rowCategoryCode)) continue;
+                return formatter.formatCellValue(row.getCell(hDescription)).trim();
+            }
+        }
+        fail("category row not found in CategoryMaster: " + categoryCode);
+        return "";
+    }
+
+    private static int countItemCategoryRowsByCategory(byte[] bytes, String categoryCode) throws Exception {
+        int count = 0;
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            Sheet sheet = wb.getSheet("ItemCategoryMaster");
+            assertNotNull(sheet, "ItemCategoryMaster sheet not found");
+
+            DataFormatter formatter = new DataFormatter();
+            int headerRowIndex = findHeaderRowIndex(sheet, formatter, "CategoryCode");
+            assertTrue(headerRowIndex >= 0, "ItemCategoryMaster header row not found");
+            Row headerRow = sheet.getRow(headerRowIndex);
+            assertNotNull(headerRow, "ItemCategoryMaster header row not found");
+
+            Map<String, Integer> headerIndex = toHeaderIndexMap(headerRow, formatter);
+            int hCategoryCode = requireColumn(headerIndex, "CategoryCode");
+
+            for (int r = headerRowIndex + 1; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+                String rowCategoryCode = formatter.formatCellValue(row.getCell(hCategoryCode)).trim();
+                if (categoryCode.equals(rowCategoryCode)) {
                     count += 1;
                 }
             }

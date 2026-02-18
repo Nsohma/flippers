@@ -3,6 +3,7 @@ import { onMounted, ref, watch } from "vue";
 import { usePosDraft } from "../composables/usePosDraft";
 import HandyCatalogPanel from "../components/pos/HandyCatalogPanel.vue";
 import HandyAddDialog from "../components/pos/HandyAddDialog.vue";
+import HandyCategoryDialog from "../components/pos/HandyCategoryDialog.vue";
 import EditHistoryPanel from "../components/pos/EditHistoryPanel.vue";
 import ModeSwitch from "../components/ModeSwitch.vue";
 
@@ -15,6 +16,7 @@ const {
   catalogState,
   handyCatalogState,
   handyAddDialog,
+  handyCategoryDialog,
   selectedHandyCategory,
   handyItems,
   filteredHandyAddItems,
@@ -27,11 +29,16 @@ const {
   clearHistory,
   loadHandyCatalog,
   selectHandyCategory,
+  swapHandyCategories,
   reorderHandyItems,
   deleteHandyItem,
   openHandyAddDialog,
   closeHandyAddDialog,
   addHandyItemFromCatalog,
+  openHandyCategoryDialog,
+  closeHandyCategoryDialog,
+  submitAddHandyCategory,
+  deleteHandyCategory,
 } = usePosDraft(API_BASE);
 
 async function onImportClick() {
@@ -60,6 +67,10 @@ async function onReorderItems({ fromIndex, toIndex }) {
   await reorderHandyItems(categoryCode, fromIndex, toIndex);
 }
 
+async function onSwapCategories({ fromCategoryCode, toCategoryCode }) {
+  await swapHandyCategories(fromCategoryCode, toCategoryCode);
+}
+
 async function onDeleteItem({ index }) {
   const categoryCode = selectedHandyCategory.value?.code ?? handyCatalogState.selectedCategoryCode;
   if (!categoryCode) return;
@@ -70,6 +81,15 @@ async function onAddItem(item) {
   const categoryCode = selectedHandyCategory.value?.code ?? handyCatalogState.selectedCategoryCode;
   if (!categoryCode) return;
   await addHandyItemFromCatalog(categoryCode, item);
+}
+
+async function onDeleteCategory(categoryCode) {
+  const code = String(categoryCode ?? "").trim();
+  if (!code) return;
+  if (!window.confirm(`カテゴリ「${code}」を削除しますか？`)) {
+    return;
+  }
+  await deleteHandyCategory(code);
 }
 </script>
 
@@ -111,9 +131,12 @@ async function onAddItem(item) {
       :items="handyItems"
       :loading="state.loading || handyCatalogState.loading"
       @select-category="selectHandyCategory"
+      @swap-categories="onSwapCategories"
       @reorder-items="onReorderItems"
       @delete-item="onDeleteItem"
       @open-add="openHandyAddDialog"
+      @open-add-category="openHandyCategoryDialog"
+      @delete-category="onDeleteCategory"
     />
 
     <HandyAddDialog
@@ -131,6 +154,15 @@ async function onAddItem(item) {
       @update:category-code="handyAddDialog.categoryCode = $event"
       @update:search="handyAddDialog.search = $event"
       @select-item="onAddItem"
+    />
+
+    <HandyCategoryDialog
+      :open="handyCategoryDialog.open"
+      :loading="state.loading"
+      :description="handyCategoryDialog.description"
+      @close="closeHandyCategoryDialog"
+      @submit="submitAddHandyCategory"
+      @update:description="handyCategoryDialog.description = $event"
     />
 
     <p v-if="state.draftId && !handyCatalogState.loading && !handyCatalogState.categories.length" class="hint">

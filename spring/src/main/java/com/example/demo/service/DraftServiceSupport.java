@@ -96,11 +96,22 @@ final class DraftServiceSupport {
             return cached;
         }
 
-        try (ByteArrayInputStream in = new ByteArrayInputStream(draft.getOriginalExcelBytes())) {
+        PosDraft latestDraft = draftRepository.findById(draft.getDraftId()).orElse(draft);
+        ItemCatalog latestCached = latestDraft.getItemCatalogOrNull();
+        if (latestCached != null) {
+            return latestCached;
+        }
+
+        try (ByteArrayInputStream in = new ByteArrayInputStream(latestDraft.getOriginalExcelBytes())) {
             PosConfigSource source = reader.read(in);
             ItemCatalog loaded = source.getItemCatalog();
-            PosDraft cachedDraft = draft.withItemCatalog(loaded);
-            draftRepository.save(cachedDraft);
+            PosDraft cachedDraft = latestDraft.withItemCatalog(loaded);
+            if (cachedDraft.getHandyCatalogOrNull() == null) {
+                cachedDraft = cachedDraft.withHandyCatalog(source.getHandyCatalog());
+            }
+            if (cachedDraft != latestDraft) {
+                draftRepository.save(cachedDraft);
+            }
             return loaded;
         } catch (IllegalArgumentException ex) {
             throw ex;
@@ -115,11 +126,22 @@ final class DraftServiceSupport {
             return cached;
         }
 
-        try (ByteArrayInputStream in = new ByteArrayInputStream(draft.getOriginalExcelBytes())) {
+        PosDraft latestDraft = draftRepository.findById(draft.getDraftId()).orElse(draft);
+        ItemCatalog latestCached = latestDraft.getHandyCatalogOrNull();
+        if (latestCached != null) {
+            return latestCached;
+        }
+
+        try (ByteArrayInputStream in = new ByteArrayInputStream(latestDraft.getOriginalExcelBytes())) {
             PosConfigSource source = reader.read(in);
             ItemCatalog loaded = source.getHandyCatalog();
-            PosDraft cachedDraft = draft.withHandyCatalog(loaded);
-            draftRepository.save(cachedDraft);
+            PosDraft cachedDraft = latestDraft.withHandyCatalog(loaded);
+            if (cachedDraft.getItemCatalogOrNull() == null) {
+                cachedDraft = cachedDraft.withItemCatalog(source.getItemCatalog());
+            }
+            if (cachedDraft != latestDraft) {
+                draftRepository.save(cachedDraft);
+            }
             return loaded;
         } catch (IllegalArgumentException ex) {
             throw ex;

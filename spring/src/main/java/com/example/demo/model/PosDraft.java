@@ -656,27 +656,105 @@ public class PosDraft implements Serializable {
         }
     }
 
+    public static class AddHandyCategoryChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final int categoryIndex;
+        private final ItemCatalog.Category category;
+
+        public AddHandyCategoryChange(int categoryIndex, ItemCatalog.Category category) {
+            this.categoryIndex = categoryIndex;
+            this.category = Objects.requireNonNull(category);
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            return config;
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return config;
+        }
+
+        @Override
+        public ItemCatalog applyHandyCatalog(ItemCatalog handyCatalog) {
+            return insertHandyCategoryAt(handyCatalog, categoryIndex, category);
+        }
+
+        @Override
+        public ItemCatalog undoHandyCatalog(ItemCatalog handyCatalog) {
+            return deleteHandyCategoryByCode(handyCatalog, category.getCode());
+        }
+    }
+
+    public static class DeleteHandyCategoryChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final int categoryIndex;
+        private final ItemCatalog.Category category;
+
+        public DeleteHandyCategoryChange(int categoryIndex, ItemCatalog.Category category) {
+            this.categoryIndex = categoryIndex;
+            this.category = Objects.requireNonNull(category);
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            return config;
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return config;
+        }
+
+        @Override
+        public ItemCatalog applyHandyCatalog(ItemCatalog handyCatalog) {
+            return deleteHandyCategoryByIndex(handyCatalog, categoryIndex, category.getCode());
+        }
+
+        @Override
+        public ItemCatalog undoHandyCatalog(ItemCatalog handyCatalog) {
+            return insertHandyCategoryAt(handyCatalog, categoryIndex, category);
+        }
+    }
+
+    public static class SwapHandyCategoriesChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final String fromCategoryCode;
+        private final String toCategoryCode;
+
+        public SwapHandyCategoriesChange(String fromCategoryCode, String toCategoryCode) {
+            this.fromCategoryCode = fromCategoryCode == null ? "" : fromCategoryCode.trim();
+            this.toCategoryCode = toCategoryCode == null ? "" : toCategoryCode.trim();
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            return config;
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return config;
+        }
+
+        @Override
+        public ItemCatalog applyHandyCatalog(ItemCatalog handyCatalog) {
+            return swapHandyCategoriesByCode(handyCatalog, fromCategoryCode, toCategoryCode);
+        }
+
+        @Override
+        public ItemCatalog undoHandyCatalog(ItemCatalog handyCatalog) {
+            return swapHandyCategoriesByCode(handyCatalog, fromCategoryCode, toCategoryCode);
+        }
+    }
+
     private static ItemCatalog reorderHandyItemsByIndex(ItemCatalog handyCatalog, String categoryCode, int fromIndex, int toIndex) {
-        if (handyCatalog == null) {
-            throw new IllegalStateException("handy catalog is not loaded");
-        }
-        if (categoryCode == null || categoryCode.isBlank()) {
-            throw new IllegalArgumentException("categoryCode is required");
-        }
-
-        List<ItemCatalog.Category> categories = new ArrayList<>(handyCatalog.getCategories());
-        int categoryIndex = -1;
-        for (int i = 0; i < categories.size(); i++) {
-            if (categoryCode.equals(categories.get(i).getCode())) {
-                categoryIndex = i;
-                break;
-            }
-        }
-        if (categoryIndex < 0) {
-            throw new IllegalArgumentException("handy category not found: " + categoryCode);
-        }
-
-        ItemCatalog.Category category = categories.get(categoryIndex);
+        HandyCategoryContext context = requireHandyCategory(handyCatalog, categoryCode);
+        ItemCatalog.Category category = context.category();
         List<ItemCatalog.Item> items = new ArrayList<>(category.getItems());
         if (fromIndex < 0 || fromIndex >= items.size()) {
             throw new IllegalArgumentException("fromIndex out of range: " + fromIndex);
@@ -690,45 +768,19 @@ public class PosDraft implements Serializable {
 
         ItemCatalog.Item moved = items.remove(fromIndex);
         items.add(toIndex, moved);
-        categories.set(
-                categoryIndex,
-                new ItemCatalog.Category(category.getCode(), category.getDescription(), items)
-        );
-        return new ItemCatalog(categories);
+        return replaceHandyCategoryItems(context, items);
     }
 
     private static ItemCatalog deleteHandyItemByIndex(ItemCatalog handyCatalog, String categoryCode, int itemIndex) {
-        if (handyCatalog == null) {
-            throw new IllegalStateException("handy catalog is not loaded");
-        }
-        if (categoryCode == null || categoryCode.isBlank()) {
-            throw new IllegalArgumentException("categoryCode is required");
-        }
-
-        List<ItemCatalog.Category> categories = new ArrayList<>(handyCatalog.getCategories());
-        int categoryIndex = -1;
-        for (int i = 0; i < categories.size(); i++) {
-            if (categoryCode.equals(categories.get(i).getCode())) {
-                categoryIndex = i;
-                break;
-            }
-        }
-        if (categoryIndex < 0) {
-            throw new IllegalArgumentException("handy category not found: " + categoryCode);
-        }
-
-        ItemCatalog.Category category = categories.get(categoryIndex);
+        HandyCategoryContext context = requireHandyCategory(handyCatalog, categoryCode);
+        ItemCatalog.Category category = context.category();
         List<ItemCatalog.Item> items = new ArrayList<>(category.getItems());
         if (itemIndex < 0 || itemIndex >= items.size()) {
             throw new IllegalArgumentException("itemIndex out of range: " + itemIndex);
         }
 
         items.remove(itemIndex);
-        categories.set(
-                categoryIndex,
-                new ItemCatalog.Category(category.getCode(), category.getDescription(), items)
-        );
-        return new ItemCatalog(categories);
+        return replaceHandyCategoryItems(context, items);
     }
 
     private static ItemCatalog insertHandyItemAt(
@@ -737,6 +789,62 @@ public class PosDraft implements Serializable {
             int itemIndex,
             ItemCatalog.Item item
     ) {
+        HandyCategoryContext context = requireHandyCategory(handyCatalog, categoryCode);
+        ItemCatalog.Category category = context.category();
+        List<ItemCatalog.Item> items = new ArrayList<>(category.getItems());
+        if (itemIndex < 0 || itemIndex > items.size()) {
+            throw new IllegalArgumentException("itemIndex out of range: " + itemIndex);
+        }
+
+        items.add(itemIndex, item);
+        return replaceHandyCategoryItems(context, items);
+    }
+
+    private static ItemCatalog insertHandyCategoryAt(
+            ItemCatalog handyCatalog,
+            int categoryIndex,
+            ItemCatalog.Category category
+    ) {
+        if (handyCatalog == null) {
+            throw new IllegalStateException("handy catalog is not loaded");
+        }
+        if (categoryIndex < 0 || categoryIndex > handyCatalog.getCategories().size()) {
+            throw new IllegalArgumentException("categoryIndex out of range: " + categoryIndex);
+        }
+        if (category.getCode() == null || category.getCode().isBlank()) {
+            throw new IllegalArgumentException("categoryCode is required");
+        }
+        if (handyCatalog.findCategory(category.getCode()) != null) {
+            throw new IllegalArgumentException("handy category already exists: " + category.getCode());
+        }
+
+        List<ItemCatalog.Category> categories = new ArrayList<>(handyCatalog.getCategories());
+        categories.add(categoryIndex, category);
+        return new ItemCatalog(categories);
+    }
+
+    private static ItemCatalog deleteHandyCategoryByIndex(
+            ItemCatalog handyCatalog,
+            int categoryIndex,
+            String expectedCategoryCode
+    ) {
+        if (handyCatalog == null) {
+            throw new IllegalStateException("handy catalog is not loaded");
+        }
+        List<ItemCatalog.Category> categories = new ArrayList<>(handyCatalog.getCategories());
+        if (categoryIndex < 0 || categoryIndex >= categories.size()) {
+            throw new IllegalArgumentException("categoryIndex out of range: " + categoryIndex);
+        }
+        ItemCatalog.Category target = categories.get(categoryIndex);
+        if (expectedCategoryCode != null && !expectedCategoryCode.isBlank()
+                && !expectedCategoryCode.equals(target.getCode())) {
+            throw new IllegalArgumentException("handy category mismatch: " + expectedCategoryCode);
+        }
+        categories.remove(categoryIndex);
+        return new ItemCatalog(categories);
+    }
+
+    private static ItemCatalog deleteHandyCategoryByCode(ItemCatalog handyCatalog, String categoryCode) {
         if (handyCatalog == null) {
             throw new IllegalStateException("handy catalog is not loaded");
         }
@@ -745,29 +853,67 @@ public class PosDraft implements Serializable {
         }
 
         List<ItemCatalog.Category> categories = new ArrayList<>(handyCatalog.getCategories());
-        int categoryIndex = -1;
+        int categoryIndex = findHandyCategoryIndex(categories, categoryCode);
+        categories.remove(categoryIndex);
+        return new ItemCatalog(categories);
+    }
+
+    private static ItemCatalog swapHandyCategoriesByCode(
+            ItemCatalog handyCatalog,
+            String fromCategoryCode,
+            String toCategoryCode
+    ) {
+        if (handyCatalog == null) {
+            throw new IllegalStateException("handy catalog is not loaded");
+        }
+        if (fromCategoryCode == null || fromCategoryCode.isBlank()) {
+            throw new IllegalArgumentException("fromCategoryCode is required");
+        }
+        if (toCategoryCode == null || toCategoryCode.isBlank()) {
+            throw new IllegalArgumentException("toCategoryCode is required");
+        }
+
+        List<ItemCatalog.Category> categories = new ArrayList<>(handyCatalog.getCategories());
+        int fromIndex = findHandyCategoryIndex(categories, fromCategoryCode);
+        int toIndex = findHandyCategoryIndex(categories, toCategoryCode);
+        if (fromIndex == toIndex) {
+            return handyCatalog;
+        }
+        ItemCatalog.Category fromCategory = categories.get(fromIndex);
+        categories.set(fromIndex, categories.get(toIndex));
+        categories.set(toIndex, fromCategory);
+        return new ItemCatalog(categories);
+    }
+
+    private static HandyCategoryContext requireHandyCategory(ItemCatalog handyCatalog, String categoryCode) {
+        if (handyCatalog == null) {
+            throw new IllegalStateException("handy catalog is not loaded");
+        }
+        if (categoryCode == null || categoryCode.isBlank()) {
+            throw new IllegalArgumentException("categoryCode is required");
+        }
+
+        List<ItemCatalog.Category> categories = new ArrayList<>(handyCatalog.getCategories());
+        int categoryIndex = findHandyCategoryIndex(categories, categoryCode);
+        return new HandyCategoryContext(categories, categoryIndex, categories.get(categoryIndex));
+    }
+
+    private static int findHandyCategoryIndex(List<ItemCatalog.Category> categories, String categoryCode) {
         for (int i = 0; i < categories.size(); i++) {
             if (categoryCode.equals(categories.get(i).getCode())) {
-                categoryIndex = i;
-                break;
+                return i;
             }
         }
-        if (categoryIndex < 0) {
-            throw new IllegalArgumentException("handy category not found: " + categoryCode);
-        }
+        throw new IllegalArgumentException("handy category not found: " + categoryCode);
+    }
 
-        ItemCatalog.Category category = categories.get(categoryIndex);
-        List<ItemCatalog.Item> items = new ArrayList<>(category.getItems());
-        if (itemIndex < 0 || itemIndex > items.size()) {
-            throw new IllegalArgumentException("itemIndex out of range: " + itemIndex);
-        }
-
-        items.add(itemIndex, item);
-        categories.set(
-                categoryIndex,
+    private static ItemCatalog replaceHandyCategoryItems(HandyCategoryContext context, List<ItemCatalog.Item> items) {
+        ItemCatalog.Category category = context.category();
+        context.categories().set(
+                context.categoryIndex(),
                 new ItemCatalog.Category(category.getCode(), category.getDescription(), items)
         );
-        return new ItemCatalog(categories);
+        return new ItemCatalog(context.categories());
     }
 
     private static class SnapshotReplaceChange implements Change {
@@ -810,6 +956,13 @@ public class PosDraft implements Serializable {
         private HistoryEntry getEntry() {
             return entry;
         }
+    }
+
+    private record HandyCategoryContext(
+            List<ItemCatalog.Category> categories,
+            int categoryIndex,
+            ItemCatalog.Category category
+    ) {
     }
 
     public static class HistoryEntry implements Serializable {

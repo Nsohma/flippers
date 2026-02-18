@@ -1,11 +1,11 @@
 package com.example.demo.dao;
 
+import com.example.demo.dao.ExcelSupport.ExcelUtil;
+import com.example.demo.dao.ExcelSupport.HeaderMap;
 import com.example.demo.model.ItemCatalog;
 import com.example.demo.model.PosConfig;
 import com.example.demo.service.port.PosConfigExporter;
 import org.apache.poi.ss.usermodel.Cell;
-import org.apache.poi.ss.usermodel.DataFormatter;
-import org.apache.poi.ss.usermodel.FormulaEvaluator;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -21,7 +21,6 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 @Component
@@ -29,6 +28,7 @@ public class PoiPosConfigExporter implements PosConfigExporter {
     private static final String SHEET_BUTTON = "PresetMenuButtonMaster";
     private static final String SHEET_MENU = "PresetMenuMaster";
     private static final String SHEET_ITEM = "ItemMaster";
+    private static final String SHEET_CATEGORY = "CategoryMaster";
     private static final String SHEET_ITEM_CATEGORY = "ItemCategoryMaster";
 
     @Override
@@ -107,6 +107,7 @@ public class PoiPosConfigExporter implements PosConfigExporter {
                 setNumericOrString(row, iUnitPrice, unitPrice);
             }
 
+            applyHandyCategoryDisplayLevels(wb, u, handyCatalog);
             applyHandyDisplayLevels(wb, u, handyCatalog);
 
             try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
@@ -160,6 +161,86 @@ public class PoiPosConfigExporter implements PosConfigExporter {
         return list;
     }
 
+    private static void applyHandyCategoryDisplayLevels(Workbook wb, ExcelUtil u, ItemCatalog handyCatalog) {
+        if (handyCatalog == null) {
+            return;
+        }
+
+        Sheet categoryMaster = wb.getSheet(SHEET_CATEGORY);
+        if (categoryMaster == null) {
+            return;
+        }
+
+        HeaderMap categoryHm = HeaderMap.from(categoryMaster, u, "CategoryCode", "DisplayLevel");
+        int hCategoryCode = categoryHm.require("CategoryCode");
+        int hDisplayLevel = categoryHm.require("DisplayLevel");
+        Integer hDescription = ExcelSupport.firstExisting(
+                categoryHm,
+                "Description",
+                "CategoryName",
+                "CategoryDescription"
+        );
+        if (hDescription == null) {
+            hDescription = hDisplayLevel + 1;
+        }
+
+        Map<String, DesiredHandyCategory> desiredByCategoryCode = new LinkedHashMap<>();
+        int displayLevel = 1;
+        for (ItemCatalog.Category category : handyCatalog.getCategories()) {
+            String categoryCode = safe(category.getCode());
+            if (categoryCode.isBlank()) {
+                continue;
+            }
+            desiredByCategoryCode.putIfAbsent(
+                    categoryCode,
+                    new DesiredHandyCategory(displayLevel, resolveHandyCategoryName(category))
+            );
+            displayLevel += 1;
+        }
+
+        Map<String, Boolean> writtenCategories = new HashMap<>();
+        List<Integer> rowsToDelete = new ArrayList<>();
+        for (int r = categoryHm.dataStartRow; r <= categoryMaster.getLastRowNum(); r++) {
+            Row row = categoryMaster.getRow(r);
+            if (row == null) continue;
+
+            String categoryCode = safe(u.str(row.getCell(hCategoryCode)));
+            if (categoryCode.isBlank()) {
+                continue;
+            }
+
+            DesiredHandyCategory desired = desiredByCategoryCode.get(categoryCode);
+            if (desired == null || writtenCategories.containsKey(categoryCode)) {
+                rowsToDelete.add(r);
+                continue;
+            }
+
+            setInt(row, hDisplayLevel, desired.displayLevel());
+            setString(row, hDescription, desired.description());
+            writtenCategories.put(categoryCode, true);
+        }
+
+        for (int i = rowsToDelete.size() - 1; i >= 0; i--) {
+            deleteRow(categoryMaster, rowsToDelete.get(i));
+        }
+
+        for (Map.Entry<String, DesiredHandyCategory> entry : desiredByCategoryCode.entrySet()) {
+            String categoryCode = entry.getKey();
+            if (writtenCategories.containsKey(categoryCode)) {
+                continue;
+            }
+
+            int rowIndex = Math.max(categoryHm.dataStartRow, categoryMaster.getLastRowNum() + 1);
+            Row row = categoryMaster.getRow(rowIndex);
+            if (row == null) {
+                row = categoryMaster.createRow(rowIndex);
+            }
+            setString(row, hCategoryCode, categoryCode);
+            setInt(row, hDisplayLevel, entry.getValue().displayLevel());
+            setString(row, hDescription, entry.getValue().description());
+        }
+    }
+
     private static void applyHandyDisplayLevels(Workbook wb, ExcelUtil u, ItemCatalog handyCatalog) {
         if (handyCatalog == null) {
             return;
@@ -174,7 +255,7 @@ public class PoiPosConfigExporter implements PosConfigExporter {
         int hCategoryCode = itemCategoryHm.require("CategoryCode");
         int hItemCode = itemCategoryHm.require("ItemCode");
         int hDisplayLevel = itemCategoryHm.require("DisplayLevel");
-        Integer hItemName = firstExisting(itemCategoryHm, "Description", "ItemName", "ItemNamePrint", "Name");
+        Integer hItemName = ExcelSupport.firstExisting(itemCategoryHm, "Description", "ItemName", "ItemNamePrint", "Name");
         if (hItemName == null) {
             hItemName = hDisplayLevel + 1;
         }
@@ -336,6 +417,14 @@ public class PoiPosConfigExporter implements PosConfigExporter {
         return safe(item.getItemCode());
     }
 
+    private static String resolveHandyCategoryName(ItemCatalog.Category category) {
+        String description = safe(category.getDescription());
+        if (!description.isBlank()) {
+            return description;
+        }
+        return safe(category.getCode());
+    }
+
     private static void setStringIfBlank(Row row, Integer colIndex, String value) {
         if (colIndex == null) {
             return;
@@ -476,89 +565,6 @@ public class PoiPosConfigExporter implements PosConfigExporter {
         return s;
     }
 
-    static class ExcelUtil {
-        private final DataFormatter fmt = new DataFormatter(Locale.ROOT);
-        private final FormulaEvaluator eval;
-
-        ExcelUtil(Workbook wb) {
-            this.eval = wb.getCreationHelper().createFormulaEvaluator();
-        }
-
-        String str(Cell cell) {
-            if (cell == null) return null;
-            return fmt.formatCellValue(cell, eval).trim();
-        }
-    }
-
-    static class HeaderMap {
-        final Map<String, Integer> col;
-        final int dataStartRow;
-
-        HeaderMap(Map<String, Integer> col, int dataStartRow) {
-            this.col = col;
-            this.dataStartRow = dataStartRow;
-        }
-
-        int require(String name) {
-            Integer idx = col.get(name);
-            if (idx == null) throw new IllegalArgumentException("Missing column '" + name + "'. headers=" + col.keySet());
-            return idx;
-        }
-
-        Integer get(String name) {
-            return col.get(name);
-        }
-
-        static HeaderMap from(Sheet sheet, ExcelUtil u, String... headerCandidates) {
-            int headerRow = findHeaderRow(sheet, u, headerCandidates);
-            Row hr = sheet.getRow(headerRow);
-            if (hr == null) throw new IllegalArgumentException("Header row not found: " + sheet.getSheetName());
-
-            Map<String, Integer> map = new HashMap<>();
-            for (int c = 0; c < hr.getLastCellNum(); c++) {
-                String h = u.str(hr.getCell(c));
-                if (h == null) continue;
-                String key = h.trim();
-                if (!key.isEmpty()) map.put(key, c);
-            }
-            return new HeaderMap(map, headerRow + 1);
-        }
-
-        static int findHeaderRow(Sheet sheet, ExcelUtil u, String... headerCandidates) {
-            int max = Math.min(sheet.getLastRowNum(), 20);
-            for (int r = 0; r <= max; r++) {
-                Row row = sheet.getRow(r);
-                if (row == null) continue;
-                for (int c = 0; c < row.getLastCellNum(); c++) {
-                    String v = u.str(row.getCell(c));
-                    if (v == null) continue;
-                    String t = v.trim();
-                    if (headerCandidates != null) {
-                        for (String candidate : headerCandidates) {
-                            if (candidate != null && !candidate.isBlank() && t.equals(candidate)) {
-                                return r;
-                            }
-                        }
-                    }
-                }
-            }
-            return 0;
-        }
-    }
-
-    private static Integer firstExisting(HeaderMap headerMap, String... candidates) {
-        if (candidates == null) {
-            return null;
-        }
-        for (String candidate : candidates) {
-            Integer found = headerMap.get(candidate);
-            if (found != null) {
-                return found;
-            }
-        }
-        return null;
-    }
-
     private record IndexedButton(int pageNumber, PosConfig.Button button) {
     }
 
@@ -566,5 +572,8 @@ public class PoiPosConfigExporter implements PosConfigExporter {
     }
 
     private record DesiredHandyItem(int displayLevel, String itemName) {
+    }
+
+    private record DesiredHandyCategory(int displayLevel, String description) {
     }
 }

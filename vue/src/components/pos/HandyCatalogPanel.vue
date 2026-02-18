@@ -20,9 +20,19 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["select-category", "reorder-items", "delete-item", "open-add"]);
+const emit = defineEmits([
+  "select-category",
+  "swap-categories",
+  "reorder-items",
+  "delete-item",
+  "open-add",
+  "open-add-category",
+  "delete-category",
+]);
 const dragFromIndex = ref(-1);
 const dragOverIndex = ref(-1);
+const dragSourceCategoryCode = ref("");
+const dragOverCategoryCode = ref("");
 
 const selectedCategory = computed(
   () =>
@@ -30,6 +40,60 @@ const selectedCategory = computed(
     props.categories[0] ??
     null,
 );
+
+function onCategoryDragStart(category, event) {
+  if (props.loading) return;
+  const code = String(category?.code ?? "").trim();
+  if (!code) return;
+  dragSourceCategoryCode.value = code;
+  dragOverCategoryCode.value = "";
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", code);
+  }
+}
+
+function onCategoryDragOver(category, event) {
+  if (props.loading) return;
+  const targetCode = String(category?.code ?? "").trim();
+  if (!targetCode) return;
+  if (!dragSourceCategoryCode.value || dragSourceCategoryCode.value === targetCode) return;
+  event.preventDefault();
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "move";
+  }
+  dragOverCategoryCode.value = targetCode;
+}
+
+function onCategoryDragLeave(category) {
+  const targetCode = String(category?.code ?? "").trim();
+  if (targetCode && dragOverCategoryCode.value === targetCode) {
+    dragOverCategoryCode.value = "";
+  }
+}
+
+function onCategoryDrop(category, event) {
+  if (props.loading) return;
+  event.preventDefault();
+  const targetCode = String(category?.code ?? "").trim();
+  if (!targetCode) {
+    resetCategoryDragState();
+    return;
+  }
+
+  const fromRaw = event.dataTransfer?.getData("text/plain");
+  const fromCode = String(fromRaw || dragSourceCategoryCode.value || "").trim();
+  if (!fromCode || fromCode === targetCode) {
+    resetCategoryDragState();
+    return;
+  }
+  emit("swap-categories", { fromCategoryCode: fromCode, toCategoryCode: targetCode });
+  resetCategoryDragState();
+}
+
+function onCategoryDragEnd() {
+  resetCategoryDragState();
+}
 
 function onItemDragStart(index, event) {
   if (props.loading) return;
@@ -86,6 +150,11 @@ function resetDragState() {
   dragFromIndex.value = -1;
   dragOverIndex.value = -1;
 }
+
+function resetCategoryDragState() {
+  dragSourceCategoryCode.value = "";
+  dragOverCategoryCode.value = "";
+}
 </script>
 
 <template>
@@ -93,13 +162,46 @@ function resetDragState() {
     <h2 class="title">ハンディカテゴリ</h2>
     <div class="layout">
       <aside class="category-pane">
+        <div class="category-head">
+          <span class="category-head-label">カテゴリ</span>
+          <div class="category-head-actions">
+            <button
+              class="category-add-btn"
+              type="button"
+              :disabled="loading"
+              title="カテゴリ追加"
+              @click="emit('open-add-category')"
+            >
+              +
+            </button>
+            <button
+              class="category-delete-btn"
+              type="button"
+              :disabled="loading || !selectedCategory?.code"
+              title="選択カテゴリ削除"
+              @click="emit('delete-category', selectedCategory?.code)"
+            >
+              ×
+            </button>
+          </div>
+        </div>
         <ul class="category-list">
           <li v-for="category in categories" :key="category.code">
             <button
               class="category-btn"
-              :class="{ active: category.code === selectedCategoryCode }"
+              :class="{
+                active: category.code === selectedCategoryCode,
+                'drag-source': category.code === dragSourceCategoryCode,
+                'drag-over': category.code === dragOverCategoryCode,
+              }"
               :disabled="loading"
+              :draggable="!loading"
               @click="emit('select-category', category.code)"
+              @dragstart="onCategoryDragStart(category, $event)"
+              @dragover="onCategoryDragOver(category, $event)"
+              @dragleave="onCategoryDragLeave(category)"
+              @drop="onCategoryDrop(category, $event)"
+              @dragend="onCategoryDragEnd"
             >
               {{ category.description || category.code }}
             </button>
@@ -187,10 +289,50 @@ function resetDragState() {
 }
 .category-list {
   list-style: none;
-  margin: 0;
+  margin: 8px 0 0;
   padding: 0;
   display: grid;
   gap: 6px;
+}
+.category-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.category-head-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #334;
+}
+.category-head-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+.category-add-btn,
+.category-delete-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  line-height: 1;
+  cursor: pointer;
+}
+.category-add-btn {
+  border: 1px solid #6fce7e;
+  background: #e9fbe9;
+  color: #1f8b2b;
+  font-weight: 700;
+}
+.category-delete-btn {
+  border: 1px solid #f0b8b8;
+  background: #fff5f5;
+  color: #a22;
+  font-size: 13px;
+}
+.category-add-btn:disabled,
+.category-delete-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .category-btn {
   width: 100%;
@@ -207,6 +349,13 @@ function resetDragState() {
   border-color: #7496d4;
   background: #eaf1ff;
   font-weight: 700;
+}
+.category-btn.drag-source {
+  opacity: 0.6;
+}
+.category-btn.drag-over {
+  border-color: #4a76c8;
+  background: #edf3ff;
 }
 .category-btn:disabled {
   opacity: 0.6;
