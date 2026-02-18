@@ -19,6 +19,8 @@ public class PoiPosConfigReader implements PosConfigReader {
     private static final String SHEET_ITEM = "ItemMaster";
     private static final String SHEET_MD_HIERARCHY = "MDHierarchyMaster";
     private static final String SHEET_POS_ITEM = "POSItemMaster";
+    private static final String SHEET_CATEGORY_MASTER = "CategoryMaster";
+    private static final String SHEET_ITEM_CATEGORY_MASTER = "ItemCategoryMaster";
 
     @Override
     public PosConfigSource read(InputStream in) throws Exception {
@@ -28,6 +30,8 @@ public class PoiPosConfigReader implements PosConfigReader {
             Sheet item = requireSheet(wb, SHEET_ITEM);
             Sheet mdHierarchy = requireSheet(wb, SHEET_MD_HIERARCHY);
             Sheet posItem = requireSheet(wb, SHEET_POS_ITEM);
+            Sheet categoryMaster = wb.getSheet(SHEET_CATEGORY_MASTER);
+            Sheet itemCategoryMaster = wb.getSheet(SHEET_ITEM_CATEGORY_MASTER);
 
             ExcelUtil u = new ExcelUtil(wb);
 
@@ -155,6 +159,109 @@ public class PoiPosConfigReader implements PosConfigReader {
             }
             ItemCatalog itemCatalog = new ItemCatalog(itemCategories);
 
+            ItemCatalog handyCatalog = ItemCatalog.empty();
+            if (categoryMaster != null && itemCategoryMaster != null) {
+                HeaderMap categoryHm = HeaderMap.from(categoryMaster, u, "CategoryCode", "DisplayLevel");
+                HeaderMap itemCategoryHm = HeaderMap.from(itemCategoryMaster, u, "CategoryCode", "ItemCode");
+
+                int cCode = categoryHm.require("CategoryCode");
+                int cDisplayLevel = categoryHm.require("DisplayLevel");
+                Integer cDescription = firstExisting(
+                        categoryHm,
+                        "Description",
+                        "CategoryName",
+                        "CategoryDescription"
+                );
+                int icCategoryCode = itemCategoryHm.require("CategoryCode");
+                int icItemCode = itemCategoryHm.require("ItemCode");
+                int icDisplayLevel = itemCategoryHm.require("DisplayLevel");
+
+                Map<String, HandyCategoryMeta> handyCategoryByCode = new LinkedHashMap<>();
+                for (int r = categoryHm.dataStartRow; r <= categoryMaster.getLastRowNum(); r++) {
+                    Row row = categoryMaster.getRow(r);
+                    if (row == null) continue;
+
+                    String categoryCode = nonNull(u.str(row.getCell(cCode)));
+                    if (isBlank(categoryCode)) continue;
+
+                    String displayLevelRaw = nonNull(u.str(row.getCell(cDisplayLevel)));
+                    if (isBlank(displayLevelRaw)) continue;
+                    int displayLevel = parseIntStrict(displayLevelRaw, "CategoryMaster.DisplayLevel");
+
+                    String description = cDescription == null
+                            ? categoryCode
+                            : nonNull(u.str(row.getCell(cDescription)));
+                    if (isBlank(description)) {
+                        description = categoryCode;
+                    }
+
+                    HandyCategoryMeta current = handyCategoryByCode.get(categoryCode);
+                    if (current == null || displayLevel < current.displayLevel()) {
+                        handyCategoryByCode.put(
+                                categoryCode,
+                                new HandyCategoryMeta(categoryCode, description, displayLevel)
+                        );
+                    }
+                }
+
+                Map<String, List<HandyItemRef>> handyItemsByCategoryCode = new LinkedHashMap<>();
+                long itemSequence = 0L;
+                for (int r = itemCategoryHm.dataStartRow; r <= itemCategoryMaster.getLastRowNum(); r++) {
+                    Row row = itemCategoryMaster.getRow(r);
+                    if (row == null) continue;
+
+                    String categoryCode = nonNull(u.str(row.getCell(icCategoryCode)));
+                    String itemCode = nonNull(u.str(row.getCell(icItemCode)));
+                    if (isBlank(categoryCode) || isBlank(itemCode)) continue;
+
+                    int displayLevel = parseIntStrict(
+                            nonNull(u.str(row.getCell(icDisplayLevel))),
+                            "ItemCategoryMaster.DisplayLevel"
+                    );
+
+                    handyItemsByCategoryCode
+                            .computeIfAbsent(categoryCode, k -> new ArrayList<>())
+                            .add(new HandyItemRef(itemCode, displayLevel, itemSequence));
+                    itemSequence += 1;
+                }
+
+                List<HandyCategoryMeta> sortedHandyCategories = new ArrayList<>(handyCategoryByCode.values());
+                sortedHandyCategories.sort(
+                        Comparator.comparingInt(HandyCategoryMeta::displayLevel)
+                                .thenComparing(HandyCategoryMeta::categoryCode)
+                );
+
+                for (String categoryCode : handyItemsByCategoryCode.keySet()) {
+                    if (handyCategoryByCode.containsKey(categoryCode)) {
+                        continue;
+                    }
+                    sortedHandyCategories.add(new HandyCategoryMeta(categoryCode, categoryCode, Integer.MAX_VALUE));
+                }
+
+                List<ItemCatalog.Category> handyCategories = new ArrayList<>();
+                for (HandyCategoryMeta meta : sortedHandyCategories) {
+                    List<HandyItemRef> handyItems = new ArrayList<>(
+                            handyItemsByCategoryCode.getOrDefault(meta.categoryCode(), List.of())
+                    );
+                    handyItems.sort(
+                            Comparator.comparingInt(HandyItemRef::displayLevel)
+                                    .thenComparingLong(HandyItemRef::sequence)
+                    );
+                    List<String> itemCodes = handyItems.stream()
+                            .map(HandyItemRef::itemCode)
+                            .toList();
+                    handyCategories.add(
+                            toItemCategory(
+                                    meta.categoryCode(),
+                                    meta.description(),
+                                    itemCodes,
+                                    itemInfoByItemCode
+                            )
+                    );
+                }
+                handyCatalog = new ItemCatalog(handyCategories);
+            }
+
             List<PosConfigSource.PageButton> pageButtons = new ArrayList<>();
             for (int r = btnHm.dataStartRow; r <= btn.getLastRowNum(); r++) {
                 Row row = btn.getRow(r);
@@ -180,7 +287,7 @@ public class PoiPosConfigReader implements PosConfigReader {
                 );
             }
 
-            return new PosConfigSource(categories, pageButtons, itemCatalog);
+            return new PosConfigSource(categories, pageButtons, itemCatalog, handyCatalog);
         }
     }
 
@@ -200,7 +307,7 @@ public class PoiPosConfigReader implements PosConfigReader {
     private static ItemCatalog.Category toItemCategory(
             String categoryCode,
             String categoryDescription,
-            LinkedHashSet<String> itemCodes,
+            Collection<String> itemCodes,
             Map<String, ItemInfo> itemInfoByItemCode
     ) {
         List<ItemCatalog.Item> items = new ArrayList<>();
@@ -216,6 +323,19 @@ public class PoiPosConfigReader implements PosConfigReader {
 
     private static String normalizeItemName(String itemName, String fallback) {
         return isBlank(itemName) ? fallback : itemName;
+    }
+
+    private static Integer firstExisting(HeaderMap headerMap, String... candidates) {
+        if (candidates == null) {
+            return null;
+        }
+        for (String candidate : candidates) {
+            Integer found = headerMap.get(candidate);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
     }
 
     private static int parseIntStrict(String s, String field) {
@@ -295,5 +415,11 @@ public class PoiPosConfigReader implements PosConfigReader {
     }
 
     private record ItemInfo(String itemName, String unitPrice) {
+    }
+
+    private record HandyCategoryMeta(String categoryCode, String description, int displayLevel) {
+    }
+
+    private record HandyItemRef(String itemCode, int displayLevel, long sequence) {
     }
 }

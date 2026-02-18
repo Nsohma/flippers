@@ -15,17 +15,18 @@ public class PosDraft implements Serializable {
     private final PosConfig config;
     private final byte[] originalExcelBytes;
     private final ItemCatalog itemCatalog;
+    private final ItemCatalog handyCatalog;
     private final String initialAction;
     private final String initialTimestamp;
     private final List<ChangeRecord> changes;
     private final int historyIndex;
 
     public PosDraft(String draftId, PosConfig config, byte[] originalExcelBytes) {
-        this(draftId, config, originalExcelBytes, null, "インポート");
+        this(draftId, config, originalExcelBytes, null, null, "インポート");
     }
 
     public PosDraft(String draftId, PosConfig config, byte[] originalExcelBytes, ItemCatalog itemCatalog) {
-        this(draftId, config, originalExcelBytes, itemCatalog, "インポート");
+        this(draftId, config, originalExcelBytes, itemCatalog, null, "インポート");
     }
 
     public PosDraft(
@@ -33,6 +34,17 @@ public class PosDraft implements Serializable {
             PosConfig config,
             byte[] originalExcelBytes,
             ItemCatalog itemCatalog,
+            ItemCatalog handyCatalog
+    ) {
+        this(draftId, config, originalExcelBytes, itemCatalog, handyCatalog, "インポート");
+    }
+
+    public PosDraft(
+            String draftId,
+            PosConfig config,
+            byte[] originalExcelBytes,
+            ItemCatalog itemCatalog,
+            ItemCatalog handyCatalog,
             String initialAction
     ) {
         this(
@@ -40,6 +52,7 @@ public class PosDraft implements Serializable {
                 config,
                 originalExcelBytes,
                 itemCatalog,
+                handyCatalog,
                 initialAction,
                 OffsetDateTime.now().toString(),
                 null,
@@ -52,6 +65,7 @@ public class PosDraft implements Serializable {
             PosConfig config,
             byte[] originalExcelBytes,
             ItemCatalog itemCatalog,
+            ItemCatalog handyCatalog,
             String initialAction,
             String initialTimestamp,
             List<ChangeRecord> changes,
@@ -61,6 +75,7 @@ public class PosDraft implements Serializable {
         this.config = Objects.requireNonNull(config);
         this.originalExcelBytes = Objects.requireNonNull(originalExcelBytes).clone();
         this.itemCatalog = itemCatalog;
+        this.handyCatalog = handyCatalog;
         this.initialAction = normalizeInitialAction(initialAction);
         this.initialTimestamp = normalizeTimestamp(initialTimestamp);
         this.changes = normalizeChanges(changes);
@@ -81,6 +96,10 @@ public class PosDraft implements Serializable {
 
     public ItemCatalog getItemCatalogOrNull() {
         return itemCatalog;
+    }
+
+    public ItemCatalog getHandyCatalogOrNull() {
+        return handyCatalog;
     }
 
     public List<HistoryEntry> getHistoryEntries() {
@@ -117,6 +136,8 @@ public class PosDraft implements Serializable {
         Objects.requireNonNull(change);
 
         PosConfig nextConfig = change.apply(config);
+        ItemCatalog nextItemCatalog = change.applyItemCatalog(itemCatalog);
+        ItemCatalog nextHandyCatalog = change.applyHandyCatalog(handyCatalog);
         List<ChangeRecord> nextChanges = new ArrayList<>(changes.subList(0, historyIndex));
         nextChanges.add(new ChangeRecord(change, HistoryEntry.of(action)));
 
@@ -131,7 +152,8 @@ public class PosDraft implements Serializable {
                 draftId,
                 nextConfig,
                 originalExcelBytes,
-                itemCatalog,
+                nextItemCatalog,
+                nextHandyCatalog,
                 initialAction,
                 initialTimestamp,
                 nextChanges,
@@ -145,11 +167,14 @@ public class PosDraft implements Serializable {
         }
         ChangeRecord changeRecord = changes.get(historyIndex - 1);
         PosConfig previousConfig = changeRecord.getChange().undo(config);
+        ItemCatalog previousItemCatalog = changeRecord.getChange().undoItemCatalog(itemCatalog);
+        ItemCatalog previousHandyCatalog = changeRecord.getChange().undoHandyCatalog(handyCatalog);
         return new PosDraft(
                 draftId,
                 previousConfig,
                 originalExcelBytes,
-                itemCatalog,
+                previousItemCatalog,
+                previousHandyCatalog,
                 initialAction,
                 initialTimestamp,
                 changes,
@@ -163,11 +188,14 @@ public class PosDraft implements Serializable {
         }
         ChangeRecord changeRecord = changes.get(historyIndex);
         PosConfig nextConfig = changeRecord.getChange().apply(config);
+        ItemCatalog nextItemCatalog = changeRecord.getChange().applyItemCatalog(itemCatalog);
+        ItemCatalog nextHandyCatalog = changeRecord.getChange().applyHandyCatalog(handyCatalog);
         return new PosDraft(
                 draftId,
                 nextConfig,
                 originalExcelBytes,
-                itemCatalog,
+                nextItemCatalog,
+                nextHandyCatalog,
                 initialAction,
                 initialTimestamp,
                 changes,
@@ -203,6 +231,7 @@ public class PosDraft implements Serializable {
                 config,
                 originalExcelBytes,
                 itemCatalog,
+                handyCatalog,
                 action,
                 OffsetDateTime.now().toString(),
                 List.of(),
@@ -219,6 +248,24 @@ public class PosDraft implements Serializable {
                 config,
                 originalExcelBytes,
                 nextItemCatalog,
+                handyCatalog,
+                initialAction,
+                initialTimestamp,
+                changes,
+                historyIndex
+        );
+    }
+
+    public PosDraft withHandyCatalog(ItemCatalog nextHandyCatalog) {
+        if (nextHandyCatalog == handyCatalog) {
+            return this;
+        }
+        return new PosDraft(
+                draftId,
+                config,
+                originalExcelBytes,
+                itemCatalog,
+                nextHandyCatalog,
                 initialAction,
                 initialTimestamp,
                 changes,
@@ -232,6 +279,7 @@ public class PosDraft implements Serializable {
                 config,
                 originalExcelBytes,
                 itemCatalog,
+                handyCatalog,
                 initialAction,
                 initialTimestamp,
                 changes,
@@ -271,6 +319,22 @@ public class PosDraft implements Serializable {
         PosConfig apply(PosConfig config);
 
         PosConfig undo(PosConfig config);
+
+        default ItemCatalog applyItemCatalog(ItemCatalog itemCatalog) {
+            return itemCatalog;
+        }
+
+        default ItemCatalog undoItemCatalog(ItemCatalog itemCatalog) {
+            return itemCatalog;
+        }
+
+        default ItemCatalog applyHandyCatalog(ItemCatalog handyCatalog) {
+            return handyCatalog;
+        }
+
+        default ItemCatalog undoHandyCatalog(ItemCatalog handyCatalog) {
+            return handyCatalog;
+        }
     }
 
     public static class SwapButtonsChange implements Change {
@@ -488,6 +552,222 @@ public class PosDraft implements Serializable {
         public PosConfig undo(PosConfig config) {
             return config.swapCategories(fromPageNumber, toPageNumber);
         }
+    }
+
+    public static class ReorderHandyItemsChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final String categoryCode;
+        private final int fromIndex;
+        private final int toIndex;
+
+        public ReorderHandyItemsChange(String categoryCode, int fromIndex, int toIndex) {
+            this.categoryCode = categoryCode == null ? "" : categoryCode.trim();
+            this.fromIndex = fromIndex;
+            this.toIndex = toIndex;
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            return config;
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return config;
+        }
+
+        @Override
+        public ItemCatalog applyHandyCatalog(ItemCatalog handyCatalog) {
+            return reorderHandyItemsByIndex(handyCatalog, categoryCode, fromIndex, toIndex);
+        }
+
+        @Override
+        public ItemCatalog undoHandyCatalog(ItemCatalog handyCatalog) {
+            return reorderHandyItemsByIndex(handyCatalog, categoryCode, toIndex, fromIndex);
+        }
+    }
+
+    public static class DeleteHandyItemChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final String categoryCode;
+        private final int itemIndex;
+        private final ItemCatalog.Item deletedItem;
+
+        public DeleteHandyItemChange(String categoryCode, int itemIndex, ItemCatalog.Item deletedItem) {
+            this.categoryCode = categoryCode == null ? "" : categoryCode.trim();
+            this.itemIndex = itemIndex;
+            this.deletedItem = Objects.requireNonNull(deletedItem);
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            return config;
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return config;
+        }
+
+        @Override
+        public ItemCatalog applyHandyCatalog(ItemCatalog handyCatalog) {
+            return deleteHandyItemByIndex(handyCatalog, categoryCode, itemIndex);
+        }
+
+        @Override
+        public ItemCatalog undoHandyCatalog(ItemCatalog handyCatalog) {
+            return insertHandyItemAt(handyCatalog, categoryCode, itemIndex, deletedItem);
+        }
+    }
+
+    public static class AddHandyItemChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final String categoryCode;
+        private final int itemIndex;
+        private final ItemCatalog.Item addedItem;
+
+        public AddHandyItemChange(String categoryCode, int itemIndex, ItemCatalog.Item addedItem) {
+            this.categoryCode = categoryCode == null ? "" : categoryCode.trim();
+            this.itemIndex = itemIndex;
+            this.addedItem = Objects.requireNonNull(addedItem);
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            return config;
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return config;
+        }
+
+        @Override
+        public ItemCatalog applyHandyCatalog(ItemCatalog handyCatalog) {
+            return insertHandyItemAt(handyCatalog, categoryCode, itemIndex, addedItem);
+        }
+
+        @Override
+        public ItemCatalog undoHandyCatalog(ItemCatalog handyCatalog) {
+            return deleteHandyItemByIndex(handyCatalog, categoryCode, itemIndex);
+        }
+    }
+
+    private static ItemCatalog reorderHandyItemsByIndex(ItemCatalog handyCatalog, String categoryCode, int fromIndex, int toIndex) {
+        if (handyCatalog == null) {
+            throw new IllegalStateException("handy catalog is not loaded");
+        }
+        if (categoryCode == null || categoryCode.isBlank()) {
+            throw new IllegalArgumentException("categoryCode is required");
+        }
+
+        List<ItemCatalog.Category> categories = new ArrayList<>(handyCatalog.getCategories());
+        int categoryIndex = -1;
+        for (int i = 0; i < categories.size(); i++) {
+            if (categoryCode.equals(categories.get(i).getCode())) {
+                categoryIndex = i;
+                break;
+            }
+        }
+        if (categoryIndex < 0) {
+            throw new IllegalArgumentException("handy category not found: " + categoryCode);
+        }
+
+        ItemCatalog.Category category = categories.get(categoryIndex);
+        List<ItemCatalog.Item> items = new ArrayList<>(category.getItems());
+        if (fromIndex < 0 || fromIndex >= items.size()) {
+            throw new IllegalArgumentException("fromIndex out of range: " + fromIndex);
+        }
+        if (toIndex < 0 || toIndex >= items.size()) {
+            throw new IllegalArgumentException("toIndex out of range: " + toIndex);
+        }
+        if (fromIndex == toIndex) {
+            return handyCatalog;
+        }
+
+        ItemCatalog.Item moved = items.remove(fromIndex);
+        items.add(toIndex, moved);
+        categories.set(
+                categoryIndex,
+                new ItemCatalog.Category(category.getCode(), category.getDescription(), items)
+        );
+        return new ItemCatalog(categories);
+    }
+
+    private static ItemCatalog deleteHandyItemByIndex(ItemCatalog handyCatalog, String categoryCode, int itemIndex) {
+        if (handyCatalog == null) {
+            throw new IllegalStateException("handy catalog is not loaded");
+        }
+        if (categoryCode == null || categoryCode.isBlank()) {
+            throw new IllegalArgumentException("categoryCode is required");
+        }
+
+        List<ItemCatalog.Category> categories = new ArrayList<>(handyCatalog.getCategories());
+        int categoryIndex = -1;
+        for (int i = 0; i < categories.size(); i++) {
+            if (categoryCode.equals(categories.get(i).getCode())) {
+                categoryIndex = i;
+                break;
+            }
+        }
+        if (categoryIndex < 0) {
+            throw new IllegalArgumentException("handy category not found: " + categoryCode);
+        }
+
+        ItemCatalog.Category category = categories.get(categoryIndex);
+        List<ItemCatalog.Item> items = new ArrayList<>(category.getItems());
+        if (itemIndex < 0 || itemIndex >= items.size()) {
+            throw new IllegalArgumentException("itemIndex out of range: " + itemIndex);
+        }
+
+        items.remove(itemIndex);
+        categories.set(
+                categoryIndex,
+                new ItemCatalog.Category(category.getCode(), category.getDescription(), items)
+        );
+        return new ItemCatalog(categories);
+    }
+
+    private static ItemCatalog insertHandyItemAt(
+            ItemCatalog handyCatalog,
+            String categoryCode,
+            int itemIndex,
+            ItemCatalog.Item item
+    ) {
+        if (handyCatalog == null) {
+            throw new IllegalStateException("handy catalog is not loaded");
+        }
+        if (categoryCode == null || categoryCode.isBlank()) {
+            throw new IllegalArgumentException("categoryCode is required");
+        }
+
+        List<ItemCatalog.Category> categories = new ArrayList<>(handyCatalog.getCategories());
+        int categoryIndex = -1;
+        for (int i = 0; i < categories.size(); i++) {
+            if (categoryCode.equals(categories.get(i).getCode())) {
+                categoryIndex = i;
+                break;
+            }
+        }
+        if (categoryIndex < 0) {
+            throw new IllegalArgumentException("handy category not found: " + categoryCode);
+        }
+
+        ItemCatalog.Category category = categories.get(categoryIndex);
+        List<ItemCatalog.Item> items = new ArrayList<>(category.getItems());
+        if (itemIndex < 0 || itemIndex > items.size()) {
+            throw new IllegalArgumentException("itemIndex out of range: " + itemIndex);
+        }
+
+        items.add(itemIndex, item);
+        categories.set(
+                categoryIndex,
+                new ItemCatalog.Category(category.getCode(), category.getDescription(), items)
+        );
+        return new ItemCatalog(categories);
     }
 
     private static class SnapshotReplaceChange implements Change {

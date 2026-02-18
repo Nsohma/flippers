@@ -158,6 +158,32 @@ class PosDraftHistoryTest {
         assertEquals(1, restored.getRow());
     }
 
+    @Test
+    void reorder_handy_items_change_is_undoable() {
+        PosConfig initial = configWithLabel("A");
+        ItemCatalog handyCatalog = new ItemCatalog(List.of(
+                new ItemCatalog.Category(
+                        "HCAT",
+                        "Handy Category",
+                        List.of(
+                                new ItemCatalog.Item("A", "A", "100"),
+                                new ItemCatalog.Item("B", "B", "200"),
+                                new ItemCatalog.Item("C", "C", "300")
+                        )
+                )
+        ));
+
+        PosDraft draft = new PosDraft("dft_test", initial, new byte[]{1}, null, handyCatalog);
+        PosDraft changed = draft.applyChange(new PosDraft.ReorderHandyItemsChange("HCAT", 0, 2), "ハンディ商品並び替え");
+        assertEquals(List.of("B", "C", "A"), handyItemCodes(changed));
+
+        PosDraft undone = changed.undo();
+        assertEquals(List.of("A", "B", "C"), handyItemCodes(undone));
+
+        PosDraft redone = undone.redo();
+        assertEquals(List.of("B", "C", "A"), handyItemCodes(redone));
+    }
+
     private static PosConfig configWithLabel(String label) {
         PosConfig.Category category = new PosConfig.Category(1, 1, 1, "PAGE", 1);
         PosConfig.Button button = new PosConfig.Button(1, 1, label, 1, "ITEM01", "100", "BTN01");
@@ -170,5 +196,14 @@ class PosDraftHistoryTest {
     private static String labelOf(PosConfig config) {
         PosConfig.Page page = config.getPage(1);
         return page.getButtons().get(0).getLabel();
+    }
+
+    private static List<String> handyItemCodes(PosDraft draft) {
+        ItemCatalog handyCatalog = draft.getHandyCatalogOrNull();
+        assertNotNull(handyCatalog);
+        ItemCatalog.Category category = handyCatalog.getCategories().get(0);
+        return category.getItems().stream()
+                .map(ItemCatalog.Item::getItemCode)
+                .toList();
     }
 }

@@ -23,7 +23,11 @@ public class ExportPosService implements ExportPosUseCase {
                 .findById(draftId)
                 .orElseThrow(() -> new NotFoundException("draft not found: " + draftId));
         try {
-            return exporter.export(draft.getOriginalExcelBytes(), draft.getConfig());
+            return exporter.export(
+                    draft.getOriginalExcelBytes(),
+                    draft.getConfig(),
+                    draft.getHandyCatalogOrNull()
+            );
         } catch (IllegalArgumentException ex) {
             throw ex;
         } catch (Exception ex) {

@@ -5,9 +5,20 @@ function normalizeApiBase(rawApiBase) {
   return (value || "/api/pos").replace(/\/+$/, "");
 }
 
+let sharedStore = null;
+let sharedApiBase = "";
+
 export function usePosDraft(rawApiBase) {
   const API_BASE = normalizeApiBase(rawApiBase);
+  if (sharedStore && sharedApiBase === API_BASE) {
+    return sharedStore;
+  }
+  sharedStore = createPosDraftStore(API_BASE);
+  sharedApiBase = API_BASE;
+  return sharedStore;
+}
 
+function createPosDraftStore(API_BASE) {
   const state = reactive({
     draftId: "",
     categories: [],
@@ -25,6 +36,13 @@ export function usePosDraft(rawApiBase) {
     loaded: false,
     loading: false,
     categories: [],
+  });
+
+  const handyCatalogState = reactive({
+    loaded: false,
+    loading: false,
+    categories: [],
+    selectedCategoryCode: "",
   });
 
   const addDialog = reactive({
@@ -55,6 +73,12 @@ export function usePosDraft(rawApiBase) {
     open: false,
     cols: "5",
     rows: "5",
+  });
+
+  const handyAddDialog = reactive({
+    open: false,
+    categoryCode: "",
+    search: "",
   });
 
   const buttonMap = computed(() => {
@@ -100,6 +124,36 @@ export function usePosDraft(rawApiBase) {
     });
   });
 
+  const selectedHandyCategory = computed(() => {
+    if (!handyCatalogState.selectedCategoryCode) return null;
+    return (
+      handyCatalogState.categories.find(
+        (category) => category.code === handyCatalogState.selectedCategoryCode,
+      ) ?? null
+    );
+  });
+
+  const handyItems = computed(() => {
+    return Array.isArray(selectedHandyCategory.value?.items) ? selectedHandyCategory.value.items : [];
+  });
+
+  const selectedHandyAddCategory = computed(() => {
+    if (!handyAddDialog.categoryCode) return null;
+    return catalogState.categories.find((category) => category.code === handyAddDialog.categoryCode) ?? null;
+  });
+
+  const filteredHandyAddItems = computed(() => {
+    const items = selectedHandyAddCategory.value?.items ?? [];
+    const keyword = handyAddDialog.search.trim().toLowerCase();
+    if (!keyword) return items;
+
+    return items.filter((item) => {
+      const code = String(item.itemCode ?? "").toLowerCase();
+      const name = String(item.itemName ?? "").toLowerCase();
+      return code.includes(keyword) || name.includes(keyword);
+    });
+  });
+
   async function readApiError(res, fallbackMessage) {
     let message = fallbackMessage;
     try {
@@ -117,6 +171,13 @@ export function usePosDraft(rawApiBase) {
     catalogState.loaded = false;
     catalogState.loading = false;
     catalogState.categories = [];
+  }
+
+  function resetHandyCatalogState() {
+    handyCatalogState.loaded = false;
+    handyCatalogState.loading = false;
+    handyCatalogState.categories = [];
+    handyCatalogState.selectedCategoryCode = "";
   }
 
   function closeAddDialog() {
@@ -144,11 +205,18 @@ export function usePosDraft(rawApiBase) {
     gridDialog.open = false;
   }
 
+  function closeHandyAddDialog() {
+    handyAddDialog.open = false;
+    handyAddDialog.categoryCode = "";
+    handyAddDialog.search = "";
+  }
+
   function closeAllDialogs() {
     closeAddDialog();
     closePriceDialog();
     closeCategoryDialog();
     closeGridDialog();
+    closeHandyAddDialog();
   }
 
   function markHistoryMutated() {
@@ -227,6 +295,192 @@ export function usePosDraft(rawApiBase) {
     return catalogState.loaded && catalogState.categories.length > 0;
   }
 
+  async function loadHandyCatalog() {
+    if (!state.draftId || handyCatalogState.loading) return;
+
+    handyCatalogState.loading = true;
+    try {
+      const res = await fetch(`${API_BASE}/drafts/${state.draftId}/handy-categories`);
+      if (!res.ok) {
+        throw new Error(await readApiError(res, `Get handy categories failed: ${res.status}`));
+      }
+      const data = await res.json();
+      const categories = Array.isArray(data?.categories) ? data.categories : [];
+      handyCatalogState.categories = categories;
+      handyCatalogState.loaded = true;
+      if (!categories.some((category) => category.code === handyCatalogState.selectedCategoryCode)) {
+        handyCatalogState.selectedCategoryCode = categories[0]?.code ?? "";
+      }
+    } catch (error) {
+      handyCatalogState.loaded = false;
+      state.error = String(error);
+    } finally {
+      handyCatalogState.loading = false;
+    }
+  }
+
+  async function reloadHandyCatalogIfLoaded() {
+    if (!handyCatalogState.loaded && handyCatalogState.categories.length === 0) return;
+    await loadHandyCatalog();
+  }
+
+  function selectHandyCategory(categoryCode) {
+    const code = String(categoryCode ?? "").trim();
+    if (!code) return;
+    if (!handyCatalogState.categories.some((category) => category.code === code)) return;
+    handyCatalogState.selectedCategoryCode = code;
+  }
+
+  async function reorderHandyItems(categoryCode, fromIndex, toIndex) {
+    if (state.loading || !state.draftId) return;
+
+    const code = String(categoryCode ?? "").trim();
+    if (!code) return;
+    if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex)) return;
+    if (fromIndex === toIndex) return;
+
+    state.error = "";
+    state.loading = true;
+    try {
+      const res = await fetch(
+        `${API_BASE}/drafts/${state.draftId}/handy-categories/${encodeURIComponent(code)}/items/reorder`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fromIndex, toIndex }),
+        },
+      );
+      if (!res.ok) {
+        throw new Error(await readApiError(res, `Reorder handy items failed: ${res.status}`));
+      }
+
+      const data = await res.json();
+      const categories = Array.isArray(data?.categories) ? data.categories : [];
+      handyCatalogState.categories = categories;
+      handyCatalogState.loaded = true;
+      if (categories.some((category) => category.code === code)) {
+        handyCatalogState.selectedCategoryCode = code;
+      } else {
+        handyCatalogState.selectedCategoryCode = categories[0]?.code ?? "";
+      }
+      markHistoryMutated();
+      await loadHistory(true);
+    } catch (error) {
+      state.error = String(error);
+    } finally {
+      state.loading = false;
+    }
+  }
+
+  async function deleteHandyItem(categoryCode, itemIndex) {
+    if (state.loading || !state.draftId) return;
+
+    const code = String(categoryCode ?? "").trim();
+    if (!code) return;
+    if (!Number.isInteger(itemIndex) || itemIndex < 0) return;
+
+    state.error = "";
+    state.loading = true;
+    try {
+      const res = await fetch(
+        `${API_BASE}/drafts/${state.draftId}/handy-categories/${encodeURIComponent(code)}/items/${itemIndex}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) {
+        throw new Error(await readApiError(res, `Delete handy item failed: ${res.status}`));
+      }
+
+      const data = await res.json();
+      const categories = Array.isArray(data?.categories) ? data.categories : [];
+      handyCatalogState.categories = categories;
+      handyCatalogState.loaded = true;
+      if (categories.some((category) => category.code === code)) {
+        handyCatalogState.selectedCategoryCode = code;
+      } else {
+        handyCatalogState.selectedCategoryCode = categories[0]?.code ?? "";
+      }
+      markHistoryMutated();
+      await loadHistory(true);
+    } catch (error) {
+      state.error = String(error);
+    } finally {
+      state.loading = false;
+    }
+  }
+
+  async function openHandyAddDialog() {
+    if (state.loading || !state.draftId) return;
+    if (!selectedHandyCategory.value?.code) return;
+
+    state.error = "";
+    const ready = await ensureItemCatalogLoaded();
+    if (!ready) {
+      state.error = "カテゴリまたは商品情報が見つかりません";
+      return;
+    }
+
+    handyAddDialog.categoryCode = catalogState.categories[0]?.code ?? "";
+    handyAddDialog.search = "";
+    handyAddDialog.open = true;
+  }
+
+  async function addHandyItemFromCatalog(handyCategoryCode, item) {
+    if (state.loading || !state.draftId || !handyAddDialog.open) return;
+
+    const targetCategoryCode = String(handyCategoryCode ?? "").trim();
+    if (!targetCategoryCode) {
+      state.error = "追加先カテゴリが選択されていません";
+      return;
+    }
+
+    const sourceCategoryCode = String(handyAddDialog.categoryCode ?? "").trim();
+    const itemCode = String(item?.itemCode ?? "").trim();
+    if (!sourceCategoryCode) {
+      state.error = "絞り込みカテゴリを選択してください";
+      return;
+    }
+    if (!itemCode) {
+      state.error = "商品を選択してください";
+      return;
+    }
+
+    state.error = "";
+    state.loading = true;
+    try {
+      const res = await fetch(
+        `${API_BASE}/drafts/${state.draftId}/handy-categories/${encodeURIComponent(targetCategoryCode)}/items`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sourceCategoryCode,
+            itemCode,
+          }),
+        },
+      );
+      if (!res.ok) {
+        throw new Error(await readApiError(res, `Add handy item failed: ${res.status}`));
+      }
+
+      const data = await res.json();
+      const categories = Array.isArray(data?.categories) ? data.categories : [];
+      handyCatalogState.categories = categories;
+      handyCatalogState.loaded = true;
+      if (categories.some((category) => category.code === targetCategoryCode)) {
+        handyCatalogState.selectedCategoryCode = targetCategoryCode;
+      } else {
+        handyCatalogState.selectedCategoryCode = categories[0]?.code ?? "";
+      }
+      closeHandyAddDialog();
+      markHistoryMutated();
+      await loadHistory(true);
+    } catch (error) {
+      state.error = String(error);
+    } finally {
+      state.loading = false;
+    }
+  }
+
   async function importExcel(file) {
     state.error = "";
     if (!file) {
@@ -253,8 +507,10 @@ export function usePosDraft(rawApiBase) {
       state.canRedo = Boolean(data?.canRedo);
       closeAllDialogs();
       resetCatalogState();
+      resetHandyCatalogState();
       await loadHistory(true);
       void loadItemCatalog();
+      void loadHandyCatalog();
     } catch (error) {
       state.error = String(error);
     } finally {
@@ -736,6 +992,7 @@ export function usePosDraft(rawApiBase) {
       applyHistoryFlags(data, false, false);
       closeAllDialogs();
       await loadHistory(true);
+      await reloadHandyCatalogIfLoaded();
     } catch (error) {
       state.error = String(error);
     } finally {
@@ -764,6 +1021,7 @@ export function usePosDraft(rawApiBase) {
       applyHistoryFlags(data, false, false);
       closeAllDialogs();
       await loadHistory(true);
+      await reloadHandyCatalogIfLoaded();
     } catch (error) {
       state.error = String(error);
     } finally {
@@ -796,6 +1054,7 @@ export function usePosDraft(rawApiBase) {
       applyHistoryFlags(data, false, false);
       closeAllDialogs();
       await loadHistory(true);
+      await reloadHandyCatalogIfLoaded();
     } catch (error) {
       state.error = String(error);
     } finally {
@@ -829,19 +1088,25 @@ export function usePosDraft(rawApiBase) {
   return {
     state,
     catalogState,
+    handyCatalogState,
     addDialog,
+    handyAddDialog,
     priceDialog,
     categoryDialog,
     gridDialog,
     buttonMap,
     gridCells,
     filteredAddItems,
+    filteredHandyAddItems,
+    selectedHandyCategory,
+    handyItems,
     importExcel,
     loadPage,
     exportExcel,
     buttonClass,
     formatPrice,
     closeAddDialog,
+    closeHandyAddDialog,
     closePriceDialog,
     closeCategoryDialog,
     closeGridDialog,
@@ -862,5 +1127,11 @@ export function usePosDraft(rawApiBase) {
     redo,
     jumpToHistory,
     clearHistory,
+    loadHandyCatalog,
+    selectHandyCategory,
+    reorderHandyItems,
+    deleteHandyItem,
+    openHandyAddDialog,
+    addHandyItemFromCatalog,
   };
 }

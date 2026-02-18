@@ -7,9 +7,10 @@ public class PosConfigSource {
     private final List<PosConfig.Category> categories;
     private final List<PageButton> pageButtons;
     private final ItemCatalog itemCatalog;
+    private final ItemCatalog handyCatalog;
 
     public PosConfigSource(List<PosConfig.Category> categories, List<PageButton> pageButtons) {
-        this(categories, pageButtons, ItemCatalog.empty());
+        this(categories, pageButtons, ItemCatalog.empty(), ItemCatalog.empty());
     }
 
     public PosConfigSource(
@@ -17,9 +18,19 @@ public class PosConfigSource {
             List<PageButton> pageButtons,
             ItemCatalog itemCatalog
     ) {
+        this(categories, pageButtons, itemCatalog, ItemCatalog.empty());
+    }
+
+    public PosConfigSource(
+            List<PosConfig.Category> categories,
+            List<PageButton> pageButtons,
+            ItemCatalog itemCatalog,
+            ItemCatalog handyCatalog
+    ) {
         this.categories = List.copyOf(Objects.requireNonNull(categories));
         this.pageButtons = List.copyOf(Objects.requireNonNull(pageButtons));
         this.itemCatalog = Objects.requireNonNull(itemCatalog);
+        this.handyCatalog = Objects.requireNonNull(handyCatalog);
     }
 
     public List<PosConfig.Category> getCategories() {
@@ -32,6 +43,10 @@ public class PosConfigSource {
 
     public ItemCatalog getItemCatalog() {
         return itemCatalog;
+    }
+
+    public ItemCatalog getHandyCatalog() {
+        return handyCatalog;
     }
 
     public static class PageButton {

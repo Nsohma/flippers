@@ -109,6 +109,25 @@ final class DraftServiceSupport {
         }
     }
 
+    static ItemCatalog loadHandyCatalog(PosDraft draft, PosConfigReader reader, DraftRepository draftRepository) {
+        ItemCatalog cached = draft.getHandyCatalogOrNull();
+        if (cached != null) {
+            return cached;
+        }
+
+        try (ByteArrayInputStream in = new ByteArrayInputStream(draft.getOriginalExcelBytes())) {
+            PosConfigSource source = reader.read(in);
+            ItemCatalog loaded = source.getHandyCatalog();
+            PosDraft cachedDraft = draft.withHandyCatalog(loaded);
+            draftRepository.save(cachedDraft);
+            return loaded;
+        } catch (IllegalArgumentException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new IllegalStateException("failed to read handy catalog", ex);
+        }
+    }
+
     static int resolveStyleKey(PosConfig config, PosConfig.Page page, int pageNumber) {
         if (!page.getButtons().isEmpty()) {
             return page.getButtons().get(0).getStyleKey();

@@ -34,6 +34,7 @@ public class ImportPosService implements ImportPosUseCase {
                 parsedDraft.config(),
                 excelBytes,
                 parsedDraft.itemCatalog(),
+                parsedDraft.handyCatalog(),
                 "インポート"
         );
         draftRepository.save(draft);
@@ -44,7 +45,7 @@ public class ImportPosService implements ImportPosUseCase {
         try (ByteArrayInputStream in = new ByteArrayInputStream(excelBytes)) {
             PosConfigSource source = reader.read(in);
             PosConfig config = PosConfig.fromSource(source);
-            return new ParsedDraft(config, source.getItemCatalog());
+            return new ParsedDraft(config, source.getItemCatalog(), source.getHandyCatalog());
         } catch (IllegalArgumentException ex) {
             throw new InvalidPosExcelException(ex.getMessage(), ex);
         } catch (Exception ex) {
@@ -52,6 +53,6 @@ public class ImportPosService implements ImportPosUseCase {
         }
     }
 
-    private record ParsedDraft(PosConfig config, ItemCatalog itemCatalog) {
+    private record ParsedDraft(PosConfig config, ItemCatalog itemCatalog, ItemCatalog handyCatalog) {
     }
 }

@@ -1,5 +1,6 @@
 package com.example.demo.dao;
 
+import com.example.demo.model.ItemCatalog;
 import com.example.demo.model.PosConfig;
 import com.example.demo.service.port.PosConfigExporter;
 import org.apache.poi.ss.usermodel.Cell;
@@ -13,9 +14,12 @@ import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -25,9 +29,15 @@ public class PoiPosConfigExporter implements PosConfigExporter {
     private static final String SHEET_BUTTON = "PresetMenuButtonMaster";
     private static final String SHEET_MENU = "PresetMenuMaster";
     private static final String SHEET_ITEM = "ItemMaster";
+    private static final String SHEET_ITEM_CATEGORY = "ItemCategoryMaster";
 
     @Override
     public byte[] export(byte[] originalExcelBytes, PosConfig config) throws Exception {
+        return export(originalExcelBytes, config, null);
+    }
+
+    @Override
+    public byte[] export(byte[] originalExcelBytes, PosConfig config, ItemCatalog handyCatalog) throws Exception {
         try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(originalExcelBytes))) {
             Sheet btn = requireSheet(wb, SHEET_BUTTON);
             Sheet menu = requireSheet(wb, SHEET_MENU);
@@ -97,6 +107,8 @@ public class PoiPosConfigExporter implements PosConfigExporter {
                 setNumericOrString(row, iUnitPrice, unitPrice);
             }
 
+            applyHandyDisplayLevels(wb, u, handyCatalog);
+
             try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
                 wb.write(out);
                 return out.toByteArray();
@@ -146,6 +158,211 @@ public class PoiPosConfigExporter implements PosConfigExporter {
         List<PosConfig.Category> list = new ArrayList<>(config.getCategories());
         list.sort(Comparator.comparingInt(PosConfig.Category::getPageNumber));
         return list;
+    }
+
+    private static void applyHandyDisplayLevels(Workbook wb, ExcelUtil u, ItemCatalog handyCatalog) {
+        if (handyCatalog == null) {
+            return;
+        }
+
+        Sheet itemCategory = wb.getSheet(SHEET_ITEM_CATEGORY);
+        if (itemCategory == null) {
+            return;
+        }
+
+        HeaderMap itemCategoryHm = HeaderMap.from(itemCategory, u, "CategoryCode", "ItemCode", "DisplayLevel");
+        int hCategoryCode = itemCategoryHm.require("CategoryCode");
+        int hItemCode = itemCategoryHm.require("ItemCode");
+        int hDisplayLevel = itemCategoryHm.require("DisplayLevel");
+        Integer hItemName = firstExisting(itemCategoryHm, "Description", "ItemName", "ItemNamePrint", "Name");
+        if (hItemName == null) {
+            hItemName = hDisplayLevel + 1;
+        }
+
+        Map<CategoryItemKey, Deque<DesiredHandyItem>> desiredItemsByKey = new LinkedHashMap<>();
+        Map<String, Integer> categoryOrder = new HashMap<>();
+        int categoryOrderIndex = 0;
+        for (ItemCatalog.Category category : handyCatalog.getCategories()) {
+            String categoryCode = safe(category.getCode());
+            if (categoryCode.isBlank()) {
+                continue;
+            }
+            categoryOrder.putIfAbsent(categoryCode, categoryOrderIndex);
+            categoryOrderIndex += 1;
+
+            int displayLevel = 1;
+            for (ItemCatalog.Item item : category.getItems()) {
+                String itemCode = safe(item.getItemCode());
+                if (itemCode.isBlank()) {
+                    continue;
+                }
+                CategoryItemKey key = new CategoryItemKey(categoryCode, itemCode);
+                String itemName = resolveHandyItemName(item);
+                desiredItemsByKey
+                        .computeIfAbsent(key, ignored -> new ArrayDeque<>())
+                        .addLast(new DesiredHandyItem(displayLevel, itemName));
+                displayLevel++;
+            }
+        }
+
+        List<Integer> rowsToDelete = new ArrayList<>();
+        for (int r = itemCategoryHm.dataStartRow; r <= itemCategory.getLastRowNum(); r++) {
+            Row row = itemCategory.getRow(r);
+            if (row == null) continue;
+
+            String categoryCode = safe(u.str(row.getCell(hCategoryCode)));
+            String itemCode = safe(u.str(row.getCell(hItemCode)));
+            if (categoryCode.isBlank() || itemCode.isBlank()) {
+                continue;
+            }
+
+            CategoryItemKey key = new CategoryItemKey(categoryCode, itemCode);
+            Deque<DesiredHandyItem> desiredItems = desiredItemsByKey.get(key);
+            if (desiredItems == null || desiredItems.isEmpty()) {
+                rowsToDelete.add(r);
+                continue;
+            }
+            DesiredHandyItem desired = desiredItems.removeFirst();
+            setInt(row, hDisplayLevel, desired.displayLevel());
+            setStringIfBlank(row, hItemName, desired.itemName());
+        }
+
+        for (int i = rowsToDelete.size() - 1; i >= 0; i--) {
+            deleteRow(itemCategory, rowsToDelete.get(i));
+        }
+
+        Map<String, Integer> firstRowByCategory = new HashMap<>();
+        Map<String, Integer> lastRowByCategory = new HashMap<>();
+        for (int r = itemCategoryHm.dataStartRow; r <= itemCategory.getLastRowNum(); r++) {
+            Row row = itemCategory.getRow(r);
+            if (row == null) continue;
+
+            String categoryCode = safe(u.str(row.getCell(hCategoryCode)));
+            String itemCode = safe(u.str(row.getCell(hItemCode)));
+            if (categoryCode.isBlank() || itemCode.isBlank()) {
+                continue;
+            }
+
+            firstRowByCategory.putIfAbsent(categoryCode, r);
+            lastRowByCategory.put(categoryCode, r);
+        }
+
+        for (ItemCatalog.Category category : handyCatalog.getCategories()) {
+            String categoryCode = safe(category.getCode());
+            if (categoryCode.isBlank()) {
+                continue;
+            }
+
+            for (ItemCatalog.Item item : category.getItems()) {
+                String itemCode = safe(item.getItemCode());
+                if (itemCode.isBlank()) {
+                    continue;
+                }
+
+                CategoryItemKey key = new CategoryItemKey(categoryCode, itemCode);
+                Deque<DesiredHandyItem> remaining = desiredItemsByKey.get(key);
+                while (remaining != null && !remaining.isEmpty()) {
+                    DesiredHandyItem desired = remaining.removeFirst();
+                    int insertRowIndex = resolveInsertRowIndex(
+                            itemCategory,
+                            categoryCode,
+                            itemCategoryHm.dataStartRow,
+                            firstRowByCategory,
+                            lastRowByCategory,
+                            categoryOrder
+                    );
+                    int lastRowBeforeInsert = itemCategory.getLastRowNum();
+                    if (insertRowIndex <= lastRowBeforeInsert) {
+                        itemCategory.shiftRows(insertRowIndex, lastRowBeforeInsert, 1, true, false);
+                        shiftTrackedRows(firstRowByCategory, insertRowIndex);
+                        shiftTrackedRows(lastRowByCategory, insertRowIndex);
+                    }
+
+                    Row row = itemCategory.createRow(insertRowIndex);
+                    setString(row, hCategoryCode, categoryCode);
+                    setString(row, hItemCode, itemCode);
+                    setInt(row, hDisplayLevel, desired.displayLevel());
+                    setString(row, hItemName, desired.itemName());
+                    firstRowByCategory.putIfAbsent(categoryCode, insertRowIndex);
+                    lastRowByCategory.put(categoryCode, insertRowIndex);
+                }
+            }
+        }
+    }
+
+    private static int resolveInsertRowIndex(
+            Sheet itemCategory,
+            String categoryCode,
+            int dataStartRow,
+            Map<String, Integer> firstRowByCategory,
+            Map<String, Integer> lastRowByCategory,
+            Map<String, Integer> categoryOrder
+    ) {
+        Integer lastRow = lastRowByCategory.get(categoryCode);
+        if (lastRow != null) {
+            return lastRow + 1;
+        }
+
+        int currentOrder = categoryOrder.getOrDefault(categoryCode, Integer.MAX_VALUE);
+        int nextCategoryFirstRow = Integer.MAX_VALUE;
+        for (Map.Entry<String, Integer> entry : firstRowByCategory.entrySet()) {
+            int otherOrder = categoryOrder.getOrDefault(entry.getKey(), Integer.MAX_VALUE);
+            if (otherOrder <= currentOrder) {
+                continue;
+            }
+            if (entry.getValue() < nextCategoryFirstRow) {
+                nextCategoryFirstRow = entry.getValue();
+            }
+        }
+        if (nextCategoryFirstRow != Integer.MAX_VALUE) {
+            return nextCategoryFirstRow;
+        }
+        return Math.max(dataStartRow, itemCategory.getLastRowNum() + 1);
+    }
+
+    private static void shiftTrackedRows(Map<String, Integer> rowMap, int fromRowInclusive) {
+        for (Map.Entry<String, Integer> entry : rowMap.entrySet()) {
+            if (entry.getValue() >= fromRowInclusive) {
+                entry.setValue(entry.getValue() + 1);
+            }
+        }
+    }
+
+    private static String resolveHandyItemName(ItemCatalog.Item item) {
+        String itemName = safe(item.getItemName());
+        if (!itemName.isBlank()) {
+            return itemName;
+        }
+        return safe(item.getItemCode());
+    }
+
+    private static void setStringIfBlank(Row row, Integer colIndex, String value) {
+        if (colIndex == null) {
+            return;
+        }
+        Cell cell = row.getCell(colIndex);
+        if (cell != null) {
+            String current = cell.toString();
+            if (current != null && !current.trim().isEmpty()) {
+                return;
+            }
+        }
+        setString(row, colIndex, value);
+    }
+
+    private static void deleteRow(Sheet sheet, int rowIndex) {
+        int lastRow = sheet.getLastRowNum();
+        if (rowIndex < 0 || rowIndex > lastRow) {
+            return;
+        }
+        if (rowIndex < lastRow) {
+            sheet.shiftRows(rowIndex + 1, lastRow, -1, true, false);
+            return;
+        }
+        Row row = sheet.getRow(rowIndex);
+        if (row != null) {
+            sheet.removeRow(row);
+        }
     }
 
     private static void writeMenuRow(
@@ -224,6 +441,9 @@ public class PoiPosConfigExporter implements PosConfigExporter {
     }
 
     private static void setString(Row row, int colIndex, String value) {
+        if (colIndex < 0) {
+            return;
+        }
         Cell cell = row.getCell(colIndex);
         if (cell == null) {
             cell = row.createCell(colIndex);
@@ -285,6 +505,10 @@ public class PoiPosConfigExporter implements PosConfigExporter {
             return idx;
         }
 
+        Integer get(String name) {
+            return col.get(name);
+        }
+
         static HeaderMap from(Sheet sheet, ExcelUtil u, String... headerCandidates) {
             int headerRow = findHeaderRow(sheet, u, headerCandidates);
             Row hr = sheet.getRow(headerRow);
@@ -322,6 +546,25 @@ public class PoiPosConfigExporter implements PosConfigExporter {
         }
     }
 
+    private static Integer firstExisting(HeaderMap headerMap, String... candidates) {
+        if (candidates == null) {
+            return null;
+        }
+        for (String candidate : candidates) {
+            Integer found = headerMap.get(candidate);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
+    }
+
     private record IndexedButton(int pageNumber, PosConfig.Button button) {
+    }
+
+    private record CategoryItemKey(String categoryCode, String itemCode) {
+    }
+
+    private record DesiredHandyItem(int displayLevel, String itemName) {
     }
 }

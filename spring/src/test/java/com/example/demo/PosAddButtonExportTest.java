@@ -15,8 +15,10 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayInputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -228,6 +230,134 @@ class PosAddButtonExportTest {
         );
     }
 
+    @Test
+    void export_updates_item_category_master_display_level_from_handy_order() throws Exception {
+        byte[] originalBytes = Files.readAllBytes(ORIGINAL);
+
+        PoiPosConfigReader reader = new PoiPosConfigReader();
+        PosConfigSource source = reader.read(new ByteArrayInputStream(originalBytes));
+        PosConfig config = PosConfig.fromSource(source);
+        ItemCatalog handyCatalog = source.getHandyCatalog();
+
+        ItemCatalog.Category targetCategory = findHandyCategoryWithAtLeastItems(handyCatalog, 3);
+        List<ItemCatalog.Item> reorderedItems = new ArrayList<>(targetCategory.getItems());
+        ItemCatalog.Item moved = reorderedItems.remove(0);
+        reorderedItems.add(2, moved);
+
+        List<ItemCatalog.Category> updatedCategories = new ArrayList<>(handyCatalog.getCategories());
+        for (int i = 0; i < updatedCategories.size(); i++) {
+            if (updatedCategories.get(i).getCode().equals(targetCategory.getCode())) {
+                updatedCategories.set(
+                        i,
+                        new ItemCatalog.Category(
+                                targetCategory.getCode(),
+                                targetCategory.getDescription(),
+                                reorderedItems
+                        )
+                );
+                break;
+            }
+        }
+        ItemCatalog updatedHandyCatalog = new ItemCatalog(updatedCategories);
+
+        PoiPosConfigExporter exporter = new PoiPosConfigExporter();
+        byte[] exported = exporter.export(originalBytes, config, updatedHandyCatalog);
+
+        assertEquals(
+                1,
+                readItemCategoryDisplayLevel(exported, targetCategory.getCode(), reorderedItems.get(0).getItemCode())
+        );
+        assertEquals(
+                2,
+                readItemCategoryDisplayLevel(exported, targetCategory.getCode(), reorderedItems.get(1).getItemCode())
+        );
+        assertEquals(
+                3,
+                readItemCategoryDisplayLevel(exported, targetCategory.getCode(), reorderedItems.get(2).getItemCode())
+        );
+    }
+
+    @Test
+    void export_removes_item_category_master_row_when_handy_item_deleted() throws Exception {
+        byte[] originalBytes = Files.readAllBytes(ORIGINAL);
+
+        PoiPosConfigReader reader = new PoiPosConfigReader();
+        PosConfigSource source = reader.read(new ByteArrayInputStream(originalBytes));
+        PosConfig config = PosConfig.fromSource(source);
+        ItemCatalog handyCatalog = source.getHandyCatalog();
+
+        HandyDeleteTarget target = findHandyDeleteTarget(handyCatalog);
+        ItemCatalog.Category targetCategory = target.category();
+        int beforeCount = countItemCategoryRows(originalBytes, targetCategory.getCode(), target.itemCode());
+
+        List<ItemCatalog.Item> remainingItems = new ArrayList<>(targetCategory.getItems());
+        remainingItems.remove(target.itemIndex());
+
+        List<ItemCatalog.Category> updatedCategories = new ArrayList<>(handyCatalog.getCategories());
+        for (int i = 0; i < updatedCategories.size(); i++) {
+            if (updatedCategories.get(i).getCode().equals(targetCategory.getCode())) {
+                updatedCategories.set(
+                        i,
+                        new ItemCatalog.Category(
+                                targetCategory.getCode(),
+                                targetCategory.getDescription(),
+                                remainingItems
+                        )
+                );
+                break;
+            }
+        }
+        ItemCatalog updatedHandyCatalog = new ItemCatalog(updatedCategories);
+
+        PoiPosConfigExporter exporter = new PoiPosConfigExporter();
+        byte[] exported = exporter.export(originalBytes, config, updatedHandyCatalog);
+
+        int afterCount = countItemCategoryRows(exported, targetCategory.getCode(), target.itemCode());
+        assertEquals(beforeCount - 1, afterCount, "ItemCategoryMaster row count did not decrease");
+    }
+
+    @Test
+    void export_adds_item_category_master_row_when_handy_item_added() throws Exception {
+        byte[] originalBytes = Files.readAllBytes(ORIGINAL);
+
+        PoiPosConfigReader reader = new PoiPosConfigReader();
+        PosConfigSource source = reader.read(new ByteArrayInputStream(originalBytes));
+        PosConfig config = PosConfig.fromSource(source);
+        ItemCatalog handyCatalog = source.getHandyCatalog();
+        ItemCatalog itemCatalog = source.getItemCatalog();
+
+        HandyAddTarget target = findHandyAddTarget(handyCatalog, itemCatalog);
+        ItemCatalog.Category targetCategory = target.handyCategory();
+        int beforeCount = countItemCategoryRows(originalBytes, targetCategory.getCode(), target.item().getItemCode());
+
+        List<ItemCatalog.Item> items = new ArrayList<>(targetCategory.getItems());
+        items.add(target.item());
+
+        List<ItemCatalog.Category> updatedCategories = new ArrayList<>(handyCatalog.getCategories());
+        for (int i = 0; i < updatedCategories.size(); i++) {
+            if (updatedCategories.get(i).getCode().equals(targetCategory.getCode())) {
+                updatedCategories.set(
+                        i,
+                        new ItemCatalog.Category(
+                                targetCategory.getCode(),
+                                targetCategory.getDescription(),
+                                items
+                        )
+                );
+                break;
+            }
+        }
+        ItemCatalog updatedHandyCatalog = new ItemCatalog(updatedCategories);
+
+        PoiPosConfigExporter exporter = new PoiPosConfigExporter();
+        byte[] exported = exporter.export(originalBytes, config, updatedHandyCatalog);
+
+        int afterCount = countItemCategoryRows(exported, targetCategory.getCode(), target.item().getItemCode());
+        assertEquals(beforeCount + 1, afterCount, "ItemCategoryMaster row count did not increase");
+        String afterName = readItemCategoryName(exported, targetCategory.getCode(), target.item().getItemCode());
+        assertEquals(target.item().getItemName(), afterName, "ItemCategoryMaster name column was not updated");
+    }
+
     private static TargetCell findFirstEmptyCell(PosConfig config) {
         for (PosConfig.Category category : config.getCategories()) {
             PosConfig.Page page = config.getPage(category.getPageNumber());
@@ -281,6 +411,57 @@ class PosAddButtonExportTest {
             }
         }
         fail("catalog has no items");
+        return null;
+    }
+
+    private static ItemCatalog.Category findHandyCategoryWithAtLeastItems(ItemCatalog catalog, int minItemCount) {
+        for (ItemCatalog.Category category : catalog.getCategories()) {
+            if (category.getItems().size() >= minItemCount) {
+                return category;
+            }
+        }
+        fail("no handy category has " + minItemCount + " or more items");
+        return null;
+    }
+
+    private static HandyDeleteTarget findHandyDeleteTarget(ItemCatalog catalog) {
+        for (ItemCatalog.Category category : catalog.getCategories()) {
+            if (category.getItems().isEmpty()) continue;
+
+            Map<String, Integer> itemCodeCounts = new HashMap<>();
+            for (ItemCatalog.Item item : category.getItems()) {
+                itemCodeCounts.merge(item.getItemCode(), 1, Integer::sum);
+            }
+            for (int i = 0; i < category.getItems().size(); i++) {
+                String itemCode = category.getItems().get(i).getItemCode();
+                if (itemCodeCounts.getOrDefault(itemCode, 0) == 1) {
+                    return new HandyDeleteTarget(category, i, itemCode);
+                }
+            }
+        }
+        fail("no handy delete target found (unique itemCode required)");
+        return null;
+    }
+
+    private static HandyAddTarget findHandyAddTarget(ItemCatalog handyCatalog, ItemCatalog itemCatalog) {
+        for (ItemCatalog.Category handyCategory : handyCatalog.getCategories()) {
+            Set<String> existingItemCodes = new HashSet<>();
+            for (ItemCatalog.Item item : handyCategory.getItems()) {
+                existingItemCodes.add(item.getItemCode());
+            }
+
+            for (ItemCatalog.Category sourceCategory : itemCatalog.getCategories()) {
+                for (ItemCatalog.Item sourceItem : sourceCategory.getItems()) {
+                    if (!existingItemCodes.contains(sourceItem.getItemCode())) {
+                        return new HandyAddTarget(
+                                handyCategory,
+                                sourceItem
+                        );
+                    }
+                }
+            }
+        }
+        fail("no handy add target found");
         return null;
     }
 
@@ -468,6 +649,101 @@ class PosAddButtonExportTest {
         return "";
     }
 
+    private static int readItemCategoryDisplayLevel(byte[] bytes, String categoryCode, String itemCode) throws Exception {
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            Sheet sheet = wb.getSheet("ItemCategoryMaster");
+            assertNotNull(sheet, "ItemCategoryMaster sheet not found");
+
+            DataFormatter formatter = new DataFormatter();
+            int headerRowIndex = findHeaderRowIndex(sheet, formatter, "CategoryCode");
+            assertTrue(headerRowIndex >= 0, "ItemCategoryMaster header row not found");
+            Row headerRow = sheet.getRow(headerRowIndex);
+            assertNotNull(headerRow, "ItemCategoryMaster header row not found");
+
+            Map<String, Integer> headerIndex = toHeaderIndexMap(headerRow, formatter);
+            int hCategoryCode = requireColumn(headerIndex, "CategoryCode");
+            int hItemCode = requireColumn(headerIndex, "ItemCode");
+            int hDisplayLevel = requireColumn(headerIndex, "DisplayLevel");
+
+            for (int r = headerRowIndex + 1; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+
+                String rowCategoryCode = formatter.formatCellValue(row.getCell(hCategoryCode)).trim();
+                String rowItemCode = formatter.formatCellValue(row.getCell(hItemCode)).trim();
+                if (!categoryCode.equals(rowCategoryCode) || !itemCode.equals(rowItemCode)) continue;
+
+                String displayLevel = formatter.formatCellValue(row.getCell(hDisplayLevel)).trim();
+                assertFalse(displayLevel.isEmpty(), "DisplayLevel is empty");
+                return toInt(displayLevel);
+            }
+        }
+
+        fail("item row not found in ItemCategoryMaster: category=" + categoryCode + ", item=" + itemCode);
+        return -1;
+    }
+
+    private static String readItemCategoryName(byte[] bytes, String categoryCode, String itemCode) throws Exception {
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            Sheet sheet = wb.getSheet("ItemCategoryMaster");
+            assertNotNull(sheet, "ItemCategoryMaster sheet not found");
+
+            DataFormatter formatter = new DataFormatter();
+            int headerRowIndex = findHeaderRowIndex(sheet, formatter, "CategoryCode");
+            assertTrue(headerRowIndex >= 0, "ItemCategoryMaster header row not found");
+            Row headerRow = sheet.getRow(headerRowIndex);
+            assertNotNull(headerRow, "ItemCategoryMaster header row not found");
+
+            Map<String, Integer> headerIndex = toHeaderIndexMap(headerRow, formatter);
+            int hCategoryCode = requireColumn(headerIndex, "CategoryCode");
+            int hItemCode = requireColumn(headerIndex, "ItemCode");
+            int hDisplayLevel = requireColumn(headerIndex, "DisplayLevel");
+            int hName = headerIndex.getOrDefault("Description", hDisplayLevel + 1);
+
+            for (int r = headerRowIndex + 1; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+
+                String rowCategoryCode = formatter.formatCellValue(row.getCell(hCategoryCode)).trim();
+                String rowItemCode = formatter.formatCellValue(row.getCell(hItemCode)).trim();
+                if (!categoryCode.equals(rowCategoryCode) || !itemCode.equals(rowItemCode)) continue;
+                return formatter.formatCellValue(row.getCell(hName)).trim();
+            }
+        }
+
+        fail("item row not found in ItemCategoryMaster: category=" + categoryCode + ", item=" + itemCode);
+        return "";
+    }
+
+    private static int countItemCategoryRows(byte[] bytes, String categoryCode, String itemCode) throws Exception {
+        int count = 0;
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            Sheet sheet = wb.getSheet("ItemCategoryMaster");
+            assertNotNull(sheet, "ItemCategoryMaster sheet not found");
+
+            DataFormatter formatter = new DataFormatter();
+            int headerRowIndex = findHeaderRowIndex(sheet, formatter, "CategoryCode");
+            assertTrue(headerRowIndex >= 0, "ItemCategoryMaster header row not found");
+            Row headerRow = sheet.getRow(headerRowIndex);
+            assertNotNull(headerRow, "ItemCategoryMaster header row not found");
+
+            Map<String, Integer> headerIndex = toHeaderIndexMap(headerRow, formatter);
+            int hCategoryCode = requireColumn(headerIndex, "CategoryCode");
+            int hItemCode = requireColumn(headerIndex, "ItemCode");
+
+            for (int r = headerRowIndex + 1; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+                String rowCategoryCode = formatter.formatCellValue(row.getCell(hCategoryCode)).trim();
+                String rowItemCode = formatter.formatCellValue(row.getCell(hItemCode)).trim();
+                if (categoryCode.equals(rowCategoryCode) && itemCode.equals(rowItemCode)) {
+                    count += 1;
+                }
+            }
+        }
+        return count;
+    }
+
     private static String normalizeNumericText(String text) {
         String trimmed = text == null ? "" : text.trim();
         if (trimmed.endsWith(".0")) {
@@ -523,6 +799,15 @@ class PosAddButtonExportTest {
     }
 
     private record MoveTarget(int pageNumber, PosConfig.Button sourceButton, int emptyCol, int emptyRow) {
+    }
+
+    private record HandyDeleteTarget(ItemCatalog.Category category, int itemIndex, String itemCode) {
+    }
+
+    private record HandyAddTarget(
+            ItemCatalog.Category handyCategory,
+            ItemCatalog.Item item
+    ) {
     }
 
     private record ButtonKey(int page, int col, int row) implements Comparable<ButtonKey> {
