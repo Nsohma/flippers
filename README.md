@@ -34,6 +34,7 @@
 3. Undo / Redo
 4. 編集履歴（折りたたみ表示、展開、クリックジャンプ、履歴削除）
 5. Excelエクスポート (`/api/pos/drafts/{draftId}/export`)
+6. 直前操作の視覚フィードバック（対象カテゴリ/商品/ボタンのハイライト）
 
 ### レジキー実装済み
 1. POS画面再現（上段カテゴリ + 下段グリッド）
@@ -46,18 +47,21 @@
 8. 上段カテゴリをゴミ箱へD&D削除
 9. 下段グリッドサイズ変更（`Page(col x row)` 右側ボタン）
 10. ボタン表示に `ItemCode` と価格表示
+11. カテゴリ削除は「削除対象を空白ハイライト -> 短時間ロック -> 詰める」演出に対応（削除待機は0.5秒）
 
 ### ハンディ実装済み
 1. `CategoryMaster` / `ItemCategoryMaster` からカテゴリ・商品を表示
 2. 左ペインカテゴリ、右ペイン商品の2カラム表示（それぞれ独立スクロール）
-3. 商品並び替え（D&D）
+3. 商品並び替え（D&D、入れ替えではなく挿入位置ベースの移動）
 4. 商品削除（`ItemCategoryMaster` の該当行削除として反映）
 5. 商品追加（カテゴリ絞り込み + 商品選択）
 6. カテゴリ追加
 7. カテゴリ削除
-8. カテゴリ並び替え（カテゴリ同士D&D）
+8. カテゴリ移動（D&D、入れ替えではなく挿入位置ベースの移動）
 9. カテゴリ追加時のコード自動採番
 10. 自動採番ルール: `10` 以上で未使用の最小数値を `CategoryCode` として採用
+11. カテゴリ/商品削除は「削除対象を空白ハイライト -> 短時間ロック -> 詰める」演出に対応（削除待機は0.5秒）
+12. カテゴリ削除時の確認ダイアログは廃止（履歴復元前提）
 
 ### エクスポート反映（実装済み）
 1. `PresetMenuButtonMaster` を `(PageNumber, ButtonColumnNumber, ButtonRowNumber)` 順で再構築
@@ -87,7 +91,7 @@
 - `spring/src/main/java/com/example/demo/controller/PosDraftController.java`
   - レジキー編集API群（ページ取得、ボタン編集、カテゴリ編集、グリッド変更、undo/redo、履歴取得・ジャンプ・削除、export）。
 - `spring/src/main/java/com/example/demo/controller/HandyDraftController.java`
-  - ハンディ編集API群（カテゴリ取得/追加/削除/入れ替え、商品追加/削除/並び替え）。
+  - ハンディ編集API群（カテゴリ取得/追加/削除/移動、商品追加/削除/並び替え）。
 - `spring/src/main/java/com/example/demo/controller/GlobalExceptionHandler.java`
   - 例外を `ErrorResponse` へ統一変換（400/404/500）。
 - `spring/src/main/java/com/example/demo/controller/CorsConfig.java`
@@ -110,11 +114,13 @@
 - `spring/src/main/java/com/example/demo/service/GetHandyCatalogService.java`
 - `spring/src/main/java/com/example/demo/service/AddHandyCategoryService.java`
 - `spring/src/main/java/com/example/demo/service/DeleteHandyCategoryService.java`
-- `spring/src/main/java/com/example/demo/service/SwapHandyCategoriesService.java`
+- `spring/src/main/java/com/example/demo/service/ReorderHandyCategoriesService.java`
 - `spring/src/main/java/com/example/demo/service/ReorderHandyItemsService.java`
 - `spring/src/main/java/com/example/demo/service/AddHandyItemService.java`
 - `spring/src/main/java/com/example/demo/service/DeleteHandyItemService.java`
   - ハンディ編集操作をユースケース単位で実行し、更新後ドラフトを保存。
+- `spring/src/main/java/com/example/demo/service/SwapHandyCategoriesService.java`
+  - 互換用のカテゴリ入れ替えユースケース（現行UIは `reorder` を使用）。
 - `spring/src/main/java/com/example/demo/service/UndoDraftService.java`
 - `spring/src/main/java/com/example/demo/service/RedoDraftService.java`
 - `spring/src/main/java/com/example/demo/service/GetDraftHistoryService.java`
@@ -137,7 +143,7 @@
   - `draftId + PosConfig + originalExcelBytes` の編集セッション単位。
   - 差分ベース履歴（`changes`, `historyEntries`, `historyIndex`）を保持し、`undo`, `redo`, `jumpToHistoryIndex`, `clearHistory` を提供。
   - `ItemCatalog` と `HandyCatalog` を保持し、再パース回数を抑制。
-  - ハンディ操作の差分 (`Add/Delete/Swap Category`, `Add/Delete/Reorder Item`) も履歴管理。
+  - ハンディ操作の差分 (`Add/Delete/Reorder Category`, `Add/Delete/Reorder Item`) も履歴管理。
 - `spring/src/main/java/com/example/demo/model/PosConfigSource.java`
   - ReaderがExcelから抽出した中間データ。
 - `spring/src/main/java/com/example/demo/model/ItemCatalog.java`
@@ -193,7 +199,8 @@
 - `vue/src/components/pos/EditHistoryPanel.vue`
   - 編集履歴表示（折りたたみ、展開、現在位置表示、クリックジャンプ、履歴削除）。
 - `vue/src/components/pos/HandyCatalogPanel.vue`
-  - ハンディカテゴリ・商品表示、カテゴリD&D入れ替え、商品D&D入れ替え、追加/削除操作の起点UI。
+  - ハンディカテゴリ・商品表示、カテゴリ/商品の挿入位置ベースD&D移動、追加/削除操作の起点UI。
+  - D&D中は「行そのもの」ではなく「行間（挿入位置）」に青ラインを表示。
 - `vue/src/components/pos/HandyAddDialog.vue`
   - ハンディ商品追加ダイアログ（カテゴリ絞り込み + 商品選択）。
 - `vue/src/components/pos/HandyCategoryDialog.vue`
@@ -226,10 +233,11 @@
 - `GET /api/pos/drafts/{draftId}/handy-categories`
 - `POST /api/pos/drafts/{draftId}/handy-categories`
 - `DELETE /api/pos/drafts/{draftId}/handy-categories/{categoryCode}`
-- `PATCH /api/pos/drafts/{draftId}/handy-categories/swap`
+- `PATCH /api/pos/drafts/{draftId}/handy-categories/reorder`
 - `PATCH /api/pos/drafts/{draftId}/handy-categories/{categoryCode}/items/reorder`
 - `POST /api/pos/drafts/{draftId}/handy-categories/{categoryCode}/items`
 - `DELETE /api/pos/drafts/{draftId}/handy-categories/{categoryCode}/items/{itemIndex}`
+- `PATCH /api/pos/drafts/{draftId}/handy-categories/swap`（互換用・現行UI未使用）
 
 ## 凹型レイヤ観点での補足
 現状の設計は、依存逆転の方向は概ね成立しています。
