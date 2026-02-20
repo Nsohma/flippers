@@ -26,7 +26,8 @@ public class ExportPosService implements ExportPosUseCase {
             return exporter.export(
                     draft.getOriginalExcelBytes(),
                     draft.getConfig(),
-                    draft.getHandyCatalogOrNull()
+                    draft.getHandyCatalogOrNull(),
+                    draft.getItemMasterCatalogOrNull()
             );
         } catch (IllegalArgumentException ex) {
             throw ex;

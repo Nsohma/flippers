@@ -14,8 +14,16 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  canUndo: {
+    type: Boolean,
+    default: false,
+  },
+  canRedo: {
+    type: Boolean,
+    default: false,
+  },
 });
-const emit = defineEmits(["jump", "clear"]);
+const emit = defineEmits(["jump", "clear", "undo", "redo"]);
 
 const expanded = ref(false);
 const reversedEntries = computed(() =>
@@ -43,9 +51,18 @@ const currentEntry = computed(() => {
   return reversedEntries.value.find((entry) => entry.index === props.currentIndex) ?? null;
 });
 const canClear = computed(() => props.entries.length > 1 && !props.loading);
+const canUndoAction = computed(() => Boolean(props.canUndo) && !props.loading);
+const canRedoAction = computed(() => Boolean(props.canRedo) && !props.loading);
 
 function toggleExpanded() {
   expanded.value = !expanded.value;
+}
+
+function onClearClick() {
+  if (!canClear.value) return;
+  const shouldClear = window.confirm("編集履歴を削除します。本当に削除しますか？");
+  if (!shouldClear) return;
+  emit("clear");
 }
 
 function formatTimestamp(value) {
@@ -81,13 +98,32 @@ function formatTimestamp(value) {
 
       <div class="head-actions">
         <button
+          class="history-op-btn"
+          type="button"
+          :disabled="!canUndoAction"
+          title="Undo"
+          @click="emit('undo')"
+        >
+          Undo
+        </button>
+        <button
+          class="history-op-btn"
+          type="button"
+          :disabled="!canRedoAction"
+          title="Redo"
+          @click="emit('redo')"
+        >
+          Redo
+        </button>
+
+        <button
           class="clear-btn"
           type="button"
           :disabled="!canClear"
           title="編集履歴を削除"
-          @click="emit('clear')"
+          @click="onClearClick"
         >
-          履歴削除
+          削除
         </button>
 
         <button
@@ -136,6 +172,8 @@ function formatTimestamp(value) {
 .head-actions {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
 }
 .title-wrap {
@@ -167,14 +205,30 @@ function formatTimestamp(value) {
   justify-content: center;
   flex-shrink: 0;
 }
+.history-op-btn {
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid #cfd8e9;
+  background: #fff;
+  color: #1f3556;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.history-op-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .clear-btn {
-  height: 28px;
+  height: 24px;
   border-radius: 999px;
   border: 1px solid #d1d8e5;
   background: #fff;
   color: #234;
-  padding: 0 10px;
-  font-size: 12px;
+  padding: 0 8px;
+  font-size: 11px;
+  line-height: 1;
   cursor: pointer;
 }
 .clear-btn:disabled {

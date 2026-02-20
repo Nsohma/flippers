@@ -1,6 +1,7 @@
 package com.example.demo.service;
 
 import com.example.demo.model.ItemCatalog;
+import com.example.demo.model.ItemMasterCatalog;
 import com.example.demo.model.PosConfig;
 import com.example.demo.model.PosConfigSource;
 import com.example.demo.model.PosDraft;
@@ -109,6 +110,9 @@ final class DraftServiceSupport {
             if (cachedDraft.getHandyCatalogOrNull() == null) {
                 cachedDraft = cachedDraft.withHandyCatalog(source.getHandyCatalog());
             }
+            if (cachedDraft.getItemMasterCatalogOrNull() == null) {
+                cachedDraft = cachedDraft.withItemMasterCatalog(source.getItemMasterCatalog());
+            }
             if (cachedDraft != latestDraft) {
                 draftRepository.save(cachedDraft);
             }
@@ -139,6 +143,9 @@ final class DraftServiceSupport {
             if (cachedDraft.getItemCatalogOrNull() == null) {
                 cachedDraft = cachedDraft.withItemCatalog(source.getItemCatalog());
             }
+            if (cachedDraft.getItemMasterCatalogOrNull() == null) {
+                cachedDraft = cachedDraft.withItemMasterCatalog(source.getItemMasterCatalog());
+            }
             if (cachedDraft != latestDraft) {
                 draftRepository.save(cachedDraft);
             }
@@ -147,6 +154,43 @@ final class DraftServiceSupport {
             throw ex;
         } catch (Exception ex) {
             throw new IllegalStateException("failed to read handy catalog", ex);
+        }
+    }
+
+    static ItemMasterCatalog loadItemMasterCatalog(
+            PosDraft draft,
+            PosConfigReader reader,
+            DraftRepository draftRepository
+    ) {
+        ItemMasterCatalog cached = draft.getItemMasterCatalogOrNull();
+        if (cached != null) {
+            return cached;
+        }
+
+        PosDraft latestDraft = draftRepository.findById(draft.getDraftId()).orElse(draft);
+        ItemMasterCatalog latestCached = latestDraft.getItemMasterCatalogOrNull();
+        if (latestCached != null) {
+            return latestCached;
+        }
+
+        try (ByteArrayInputStream in = new ByteArrayInputStream(latestDraft.getOriginalExcelBytes())) {
+            PosConfigSource source = reader.read(in);
+            ItemMasterCatalog loaded = source.getItemMasterCatalog();
+            PosDraft cachedDraft = latestDraft.withItemMasterCatalog(loaded);
+            if (cachedDraft.getItemCatalogOrNull() == null) {
+                cachedDraft = cachedDraft.withItemCatalog(source.getItemCatalog());
+            }
+            if (cachedDraft.getHandyCatalogOrNull() == null) {
+                cachedDraft = cachedDraft.withHandyCatalog(source.getHandyCatalog());
+            }
+            if (cachedDraft != latestDraft) {
+                draftRepository.save(cachedDraft);
+            }
+            return loaded;
+        } catch (IllegalArgumentException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new IllegalStateException("failed to read item master catalog", ex);
         }
     }
 

@@ -4,7 +4,10 @@ import java.io.ObjectStreamException;
 import java.io.Serializable;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 public class PosDraft implements Serializable {
@@ -16,17 +19,18 @@ public class PosDraft implements Serializable {
     private final byte[] originalExcelBytes;
     private final ItemCatalog itemCatalog;
     private final ItemCatalog handyCatalog;
+    private final ItemMasterCatalog itemMasterCatalog;
     private final String initialAction;
     private final String initialTimestamp;
     private final List<ChangeRecord> changes;
     private final int historyIndex;
 
     public PosDraft(String draftId, PosConfig config, byte[] originalExcelBytes) {
-        this(draftId, config, originalExcelBytes, null, null, "インポート");
+        this(draftId, config, originalExcelBytes, null, null, null, "インポート");
     }
 
     public PosDraft(String draftId, PosConfig config, byte[] originalExcelBytes, ItemCatalog itemCatalog) {
-        this(draftId, config, originalExcelBytes, itemCatalog, null, "インポート");
+        this(draftId, config, originalExcelBytes, itemCatalog, null, null, "インポート");
     }
 
     public PosDraft(
@@ -36,7 +40,7 @@ public class PosDraft implements Serializable {
             ItemCatalog itemCatalog,
             ItemCatalog handyCatalog
     ) {
-        this(draftId, config, originalExcelBytes, itemCatalog, handyCatalog, "インポート");
+        this(draftId, config, originalExcelBytes, itemCatalog, handyCatalog, null, "インポート");
     }
 
     public PosDraft(
@@ -47,12 +51,25 @@ public class PosDraft implements Serializable {
             ItemCatalog handyCatalog,
             String initialAction
     ) {
+        this(draftId, config, originalExcelBytes, itemCatalog, handyCatalog, null, initialAction);
+    }
+
+    public PosDraft(
+            String draftId,
+            PosConfig config,
+            byte[] originalExcelBytes,
+            ItemCatalog itemCatalog,
+            ItemCatalog handyCatalog,
+            ItemMasterCatalog itemMasterCatalog,
+            String initialAction
+    ) {
         this(
                 draftId,
                 config,
                 originalExcelBytes,
                 itemCatalog,
                 handyCatalog,
+                itemMasterCatalog,
                 initialAction,
                 OffsetDateTime.now().toString(),
                 null,
@@ -66,6 +83,7 @@ public class PosDraft implements Serializable {
             byte[] originalExcelBytes,
             ItemCatalog itemCatalog,
             ItemCatalog handyCatalog,
+            ItemMasterCatalog itemMasterCatalog,
             String initialAction,
             String initialTimestamp,
             List<ChangeRecord> changes,
@@ -76,6 +94,7 @@ public class PosDraft implements Serializable {
         this.originalExcelBytes = Objects.requireNonNull(originalExcelBytes).clone();
         this.itemCatalog = itemCatalog;
         this.handyCatalog = handyCatalog;
+        this.itemMasterCatalog = itemMasterCatalog;
         this.initialAction = normalizeInitialAction(initialAction);
         this.initialTimestamp = normalizeTimestamp(initialTimestamp);
         this.changes = normalizeChanges(changes);
@@ -100,6 +119,10 @@ public class PosDraft implements Serializable {
 
     public ItemCatalog getHandyCatalogOrNull() {
         return handyCatalog;
+    }
+
+    public ItemMasterCatalog getItemMasterCatalogOrNull() {
+        return itemMasterCatalog;
     }
 
     public List<HistoryEntry> getHistoryEntries() {
@@ -138,6 +161,7 @@ public class PosDraft implements Serializable {
         PosConfig nextConfig = change.apply(config);
         ItemCatalog nextItemCatalog = change.applyItemCatalog(itemCatalog);
         ItemCatalog nextHandyCatalog = change.applyHandyCatalog(handyCatalog);
+        ItemMasterCatalog nextItemMasterCatalog = change.applyItemMasterCatalog(itemMasterCatalog);
         List<ChangeRecord> nextChanges = new ArrayList<>(changes.subList(0, historyIndex));
         nextChanges.add(new ChangeRecord(change, HistoryEntry.of(action)));
 
@@ -154,6 +178,7 @@ public class PosDraft implements Serializable {
                 originalExcelBytes,
                 nextItemCatalog,
                 nextHandyCatalog,
+                nextItemMasterCatalog,
                 initialAction,
                 initialTimestamp,
                 nextChanges,
@@ -169,12 +194,14 @@ public class PosDraft implements Serializable {
         PosConfig previousConfig = changeRecord.getChange().undo(config);
         ItemCatalog previousItemCatalog = changeRecord.getChange().undoItemCatalog(itemCatalog);
         ItemCatalog previousHandyCatalog = changeRecord.getChange().undoHandyCatalog(handyCatalog);
+        ItemMasterCatalog previousItemMasterCatalog = changeRecord.getChange().undoItemMasterCatalog(itemMasterCatalog);
         return new PosDraft(
                 draftId,
                 previousConfig,
                 originalExcelBytes,
                 previousItemCatalog,
                 previousHandyCatalog,
+                previousItemMasterCatalog,
                 initialAction,
                 initialTimestamp,
                 changes,
@@ -190,12 +217,14 @@ public class PosDraft implements Serializable {
         PosConfig nextConfig = changeRecord.getChange().apply(config);
         ItemCatalog nextItemCatalog = changeRecord.getChange().applyItemCatalog(itemCatalog);
         ItemCatalog nextHandyCatalog = changeRecord.getChange().applyHandyCatalog(handyCatalog);
+        ItemMasterCatalog nextItemMasterCatalog = changeRecord.getChange().applyItemMasterCatalog(itemMasterCatalog);
         return new PosDraft(
                 draftId,
                 nextConfig,
                 originalExcelBytes,
                 nextItemCatalog,
                 nextHandyCatalog,
+                nextItemMasterCatalog,
                 initialAction,
                 initialTimestamp,
                 changes,
@@ -232,6 +261,7 @@ public class PosDraft implements Serializable {
                 originalExcelBytes,
                 itemCatalog,
                 handyCatalog,
+                itemMasterCatalog,
                 action,
                 OffsetDateTime.now().toString(),
                 List.of(),
@@ -249,6 +279,7 @@ public class PosDraft implements Serializable {
                 originalExcelBytes,
                 nextItemCatalog,
                 handyCatalog,
+                itemMasterCatalog,
                 initialAction,
                 initialTimestamp,
                 changes,
@@ -266,6 +297,25 @@ public class PosDraft implements Serializable {
                 originalExcelBytes,
                 itemCatalog,
                 nextHandyCatalog,
+                itemMasterCatalog,
+                initialAction,
+                initialTimestamp,
+                changes,
+                historyIndex
+        );
+    }
+
+    public PosDraft withItemMasterCatalog(ItemMasterCatalog nextItemMasterCatalog) {
+        if (nextItemMasterCatalog == itemMasterCatalog) {
+            return this;
+        }
+        return new PosDraft(
+                draftId,
+                config,
+                originalExcelBytes,
+                itemCatalog,
+                handyCatalog,
+                nextItemMasterCatalog,
                 initialAction,
                 initialTimestamp,
                 changes,
@@ -280,6 +330,7 @@ public class PosDraft implements Serializable {
                 originalExcelBytes,
                 itemCatalog,
                 handyCatalog,
+                itemMasterCatalog,
                 initialAction,
                 initialTimestamp,
                 changes,
@@ -334,6 +385,14 @@ public class PosDraft implements Serializable {
 
         default ItemCatalog undoHandyCatalog(ItemCatalog handyCatalog) {
             return handyCatalog;
+        }
+
+        default ItemMasterCatalog applyItemMasterCatalog(ItemMasterCatalog itemMasterCatalog) {
+            return itemMasterCatalog;
+        }
+
+        default ItemMasterCatalog undoItemMasterCatalog(ItemMasterCatalog itemMasterCatalog) {
+            return itemMasterCatalog;
         }
     }
 
@@ -450,6 +509,58 @@ public class PosDraft implements Serializable {
         @Override
         public PosConfig undo(PosConfig config) {
             return config.updateUnitPrice(pageNumber, buttonId, beforeUnitPrice);
+        }
+    }
+
+    public static class UpdateItemMasterItemChange implements Change {
+        private static final long serialVersionUID = 1L;
+
+        private final ItemMasterCatalog.Item beforeItem;
+        private final ItemMasterCatalog.Item afterItem;
+
+        public UpdateItemMasterItemChange(ItemMasterCatalog.Item beforeItem, ItemMasterCatalog.Item afterItem) {
+            this.beforeItem = Objects.requireNonNull(beforeItem);
+            this.afterItem = Objects.requireNonNull(afterItem);
+        }
+
+        @Override
+        public PosConfig apply(PosConfig config) {
+            return rewriteConfigByItemMaster(config, beforeItem, afterItem);
+        }
+
+        @Override
+        public PosConfig undo(PosConfig config) {
+            return rewriteConfigByItemMaster(config, afterItem, beforeItem);
+        }
+
+        @Override
+        public ItemCatalog applyItemCatalog(ItemCatalog itemCatalog) {
+            return rewriteCatalogByItemMaster(itemCatalog, beforeItem, afterItem);
+        }
+
+        @Override
+        public ItemCatalog undoItemCatalog(ItemCatalog itemCatalog) {
+            return rewriteCatalogByItemMaster(itemCatalog, afterItem, beforeItem);
+        }
+
+        @Override
+        public ItemCatalog applyHandyCatalog(ItemCatalog handyCatalog) {
+            return rewriteCatalogByItemMaster(handyCatalog, beforeItem, afterItem);
+        }
+
+        @Override
+        public ItemCatalog undoHandyCatalog(ItemCatalog handyCatalog) {
+            return rewriteCatalogByItemMaster(handyCatalog, afterItem, beforeItem);
+        }
+
+        @Override
+        public ItemMasterCatalog applyItemMasterCatalog(ItemMasterCatalog itemMasterCatalog) {
+            return rewriteItemMasterCatalog(itemMasterCatalog, beforeItem, afterItem);
+        }
+
+        @Override
+        public ItemMasterCatalog undoItemMasterCatalog(ItemMasterCatalog itemMasterCatalog) {
+            return rewriteItemMasterCatalog(itemMasterCatalog, afterItem, beforeItem);
         }
     }
 
@@ -971,6 +1082,172 @@ public class PosDraft implements Serializable {
                 new ItemCatalog.Category(category.getCode(), category.getDescription(), items)
         );
         return new ItemCatalog(context.categories());
+    }
+
+    private static PosConfig rewriteConfigByItemMaster(
+            PosConfig config,
+            ItemMasterCatalog.Item fromItem,
+            ItemMasterCatalog.Item toItem
+    ) {
+        if (config == null) {
+            return null;
+        }
+        String fromCode = fromItem.getItemCode();
+        String toCode = toItem.getItemCode();
+        String toUnitPrice = toItem.getUnitPrice();
+
+        boolean changed = false;
+        Map<Integer, PosConfig.Page> updatedPages = new LinkedHashMap<>();
+        for (Map.Entry<Integer, PosConfig.Page> entry : config.getPagesByPageNumber().entrySet()) {
+            PosConfig.Page page = entry.getValue();
+            boolean pageChanged = false;
+            List<PosConfig.Button> updatedButtons = new ArrayList<>(page.getButtons().size());
+            for (PosConfig.Button button : page.getButtons()) {
+                if (!fromCode.equals(button.getItemCode())) {
+                    updatedButtons.add(button);
+                    continue;
+                }
+                PosConfig.Button rewritten = new PosConfig.Button(
+                        button.getCol(),
+                        button.getRow(),
+                        button.getLabel(),
+                        button.getStyleKey(),
+                        toCode,
+                        toUnitPrice,
+                        button.getButtonId()
+                );
+                updatedButtons.add(rewritten);
+                if (!sameButton(button, rewritten)) {
+                    pageChanged = true;
+                }
+            }
+            if (pageChanged) {
+                changed = true;
+                updatedPages.put(
+                        entry.getKey(),
+                        new PosConfig.Page(page.getPageNumber(), page.getCols(), page.getRows(), List.copyOf(updatedButtons))
+                );
+            } else {
+                updatedPages.put(entry.getKey(), page);
+            }
+        }
+
+        if (!changed) {
+            return config;
+        }
+        return new PosConfig(config.getCategories(), Collections.unmodifiableMap(updatedPages));
+    }
+
+    private static ItemCatalog rewriteCatalogByItemMaster(
+            ItemCatalog catalog,
+            ItemMasterCatalog.Item fromItem,
+            ItemMasterCatalog.Item toItem
+    ) {
+        if (catalog == null) {
+            return null;
+        }
+        String fromCode = fromItem.getItemCode();
+        String toCode = toItem.getItemCode();
+        String toName = toItem.getItemNamePrint();
+        String toUnitPrice = toItem.getUnitPrice();
+
+        boolean changed = false;
+        List<ItemCatalog.Category> updatedCategories = new ArrayList<>(catalog.getCategories().size());
+        for (ItemCatalog.Category category : catalog.getCategories()) {
+            boolean categoryChanged = false;
+            List<ItemCatalog.Item> updatedItems = new ArrayList<>(category.getItems().size());
+            for (ItemCatalog.Item item : category.getItems()) {
+                if (!fromCode.equals(item.getItemCode())) {
+                    updatedItems.add(item);
+                    continue;
+                }
+                ItemCatalog.Item rewritten = new ItemCatalog.Item(toCode, toName, toUnitPrice);
+                updatedItems.add(rewritten);
+                if (!sameCatalogItem(item, rewritten)) {
+                    categoryChanged = true;
+                }
+            }
+            if (categoryChanged) {
+                changed = true;
+                updatedCategories.add(new ItemCatalog.Category(
+                        category.getCode(),
+                        category.getDescription(),
+                        List.copyOf(updatedItems)
+                ));
+            } else {
+                updatedCategories.add(category);
+            }
+        }
+
+        if (!changed) {
+            return catalog;
+        }
+        return new ItemCatalog(updatedCategories);
+    }
+
+    private static ItemMasterCatalog rewriteItemMasterCatalog(
+            ItemMasterCatalog itemMasterCatalog,
+            ItemMasterCatalog.Item fromItem,
+            ItemMasterCatalog.Item toItem
+    ) {
+        if (itemMasterCatalog == null) {
+            throw new IllegalStateException("item master catalog is not loaded");
+        }
+        String fromCode = fromItem.getItemCode();
+        String toCode = toItem.getItemCode();
+
+        List<ItemMasterCatalog.Item> currentItems = itemMasterCatalog.getItems();
+        int targetIndex = -1;
+        for (int i = 0; i < currentItems.size(); i++) {
+            if (fromCode.equals(currentItems.get(i).getItemCode())) {
+                targetIndex = i;
+                break;
+            }
+        }
+        if (targetIndex < 0) {
+            throw new IllegalArgumentException("item not found in item master: " + fromCode);
+        }
+        if (!fromCode.equals(toCode)) {
+            for (int i = 0; i < currentItems.size(); i++) {
+                if (i == targetIndex) {
+                    continue;
+                }
+                if (toCode.equals(currentItems.get(i).getItemCode())) {
+                    throw new IllegalArgumentException("itemCode already exists: " + toCode);
+                }
+            }
+        }
+
+        List<ItemMasterCatalog.Item> updatedItems = new ArrayList<>(currentItems);
+        updatedItems.set(targetIndex, toItem);
+        if (sameItemMasterItem(currentItems.get(targetIndex), toItem)) {
+            return itemMasterCatalog;
+        }
+        return new ItemMasterCatalog(updatedItems);
+    }
+
+    private static boolean sameButton(PosConfig.Button left, PosConfig.Button right) {
+        return left.getCol() == right.getCol()
+                && left.getRow() == right.getRow()
+                && left.getStyleKey() == right.getStyleKey()
+                && Objects.equals(left.getLabel(), right.getLabel())
+                && Objects.equals(left.getItemCode(), right.getItemCode())
+                && Objects.equals(left.getUnitPrice(), right.getUnitPrice())
+                && Objects.equals(left.getButtonId(), right.getButtonId());
+    }
+
+    private static boolean sameCatalogItem(ItemCatalog.Item left, ItemCatalog.Item right) {
+        return Objects.equals(left.getItemCode(), right.getItemCode())
+                && Objects.equals(left.getItemName(), right.getItemName())
+                && Objects.equals(left.getUnitPrice(), right.getUnitPrice());
+    }
+
+    private static boolean sameItemMasterItem(ItemMasterCatalog.Item left, ItemMasterCatalog.Item right) {
+        return Objects.equals(left.getItemCode(), right.getItemCode())
+                && Objects.equals(left.getItemNamePrint(), right.getItemNamePrint())
+                && Objects.equals(left.getUnitPrice(), right.getUnitPrice())
+                && Objects.equals(left.getCostPrice(), right.getCostPrice())
+                && Objects.equals(left.getBasePrice(), right.getBasePrice());
     }
 
     private static class SnapshotReplaceChange implements Change {

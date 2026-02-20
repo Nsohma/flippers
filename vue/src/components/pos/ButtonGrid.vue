@@ -209,8 +209,9 @@ const emit = defineEmits([
   transform: scale(1);
 }
 .add-trigger:disabled {
-  opacity: 0.3;
+  opacity: 0;
   pointer-events: none;
+  transform: scale(0.9);
 }
 .delete-trigger {
   position: absolute;
@@ -237,8 +238,9 @@ const emit = defineEmits([
   transform: scale(1);
 }
 .delete-trigger:disabled {
-  opacity: 0.3;
+  opacity: 0;
   pointer-events: none;
+  transform: scale(0.9);
 }
 .price-trigger {
   position: absolute;
@@ -265,8 +267,16 @@ const emit = defineEmits([
   transform: scale(1);
 }
 .price-trigger:disabled {
-  opacity: 0.3;
+  opacity: 0;
   pointer-events: none;
+  transform: scale(0.9);
+}
+.is-empty:hover .add-trigger:disabled,
+.has-button:hover .delete-trigger:disabled,
+.has-button:hover .price-trigger:disabled {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.9);
 }
 .drag-source {
   outline: 2px solid #6c8cff;

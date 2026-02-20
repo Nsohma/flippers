@@ -1,6 +1,7 @@
 package com.example.demo.service;
 
 import com.example.demo.model.ItemCatalog;
+import com.example.demo.model.ItemMasterCatalog;
 import com.example.demo.model.PosConfig;
 import com.example.demo.model.PosConfigSource;
 import com.example.demo.model.PosDraft;
@@ -35,6 +36,7 @@ public class ImportPosService implements ImportPosUseCase {
                 excelBytes,
                 parsedDraft.itemCatalog(),
                 parsedDraft.handyCatalog(),
+                parsedDraft.itemMasterCatalog(),
                 "インポート"
         );
         draftRepository.save(draft);
@@ -45,7 +47,12 @@ public class ImportPosService implements ImportPosUseCase {
         try (ByteArrayInputStream in = new ByteArrayInputStream(excelBytes)) {
             PosConfigSource source = reader.read(in);
             PosConfig config = PosConfig.fromSource(source);
-            return new ParsedDraft(config, source.getItemCatalog(), source.getHandyCatalog());
+            return new ParsedDraft(
+                    config,
+                    source.getItemCatalog(),
+                    source.getHandyCatalog(),
+                    source.getItemMasterCatalog()
+            );
         } catch (IllegalArgumentException ex) {
             throw new InvalidPosExcelException(ex.getMessage(), ex);
         } catch (Exception ex) {
@@ -53,6 +60,11 @@ public class ImportPosService implements ImportPosUseCase {
         }
     }
 
-    private record ParsedDraft(PosConfig config, ItemCatalog itemCatalog, ItemCatalog handyCatalog) {
+    private record ParsedDraft(
+            PosConfig config,
+            ItemCatalog itemCatalog,
+            ItemCatalog handyCatalog,
+            ItemMasterCatalog itemMasterCatalog
+    ) {
     }
 }

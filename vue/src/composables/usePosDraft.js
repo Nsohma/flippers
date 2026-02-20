@@ -754,6 +754,61 @@ function createPosDraftStore(API_BASE) {
     }
   }
 
+  async function updateItemMasterItem(currentItemCode, payload) {
+    if (state.loading || !state.draftId) return false;
+
+    const normalizedCurrentItemCode = String(currentItemCode ?? "").trim();
+    if (!normalizedCurrentItemCode) {
+      state.error = "currentItemCodeがありません";
+      return false;
+    }
+
+    const body = {
+      itemCode: String(payload?.itemCode ?? "").trim(),
+      itemNamePrint: String(payload?.itemNamePrint ?? "").trim(),
+      unitPrice: String(payload?.unitPrice ?? "").trim(),
+      costPrice: String(payload?.costPrice ?? "").trim(),
+      basePrice: String(payload?.basePrice ?? "").trim(),
+    };
+
+    state.error = "";
+    state.loading = true;
+    try {
+      const res = await fetch(
+        `${API_BASE}/drafts/${state.draftId}/item-master/${encodeURIComponent(normalizedCurrentItemCode)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      if (!res.ok) {
+        throw new Error(await readApiError(res, `Update item master failed: ${res.status}`));
+      }
+
+      markHistoryMutated();
+      await loadHistory(true);
+      if (catalogState.loaded) {
+        await loadItemCatalog();
+      }
+      if (handyCatalogState.loaded) {
+        await loadHandyCatalog();
+      }
+      if (Number.isInteger(state.selectedPageNumber) && state.selectedPageNumber > 0) {
+        const pageRes = await fetch(`${API_BASE}/drafts/${state.draftId}/pages/${state.selectedPageNumber}`);
+        if (pageRes.ok) {
+          state.page = await pageRes.json();
+        }
+      }
+      return true;
+    } catch (error) {
+      state.error = String(error);
+      return false;
+    } finally {
+      state.loading = false;
+    }
+  }
+
   function buttonClass(styleKey) {
     return `btn style-${styleKey}`;
   }
@@ -1306,6 +1361,7 @@ function createPosDraftStore(API_BASE) {
     importExcel,
     loadPage,
     exportExcel,
+    updateItemMasterItem,
     buttonClass,
     formatPrice,
     closeAddDialog,

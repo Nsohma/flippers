@@ -6,12 +6,15 @@ import com.example.demo.controller.dto.CategoryStateResponse;
 import com.example.demo.controller.dto.DeleteButtonRequest;
 import com.example.demo.controller.dto.DraftHistoryResponse;
 import com.example.demo.controller.dto.ItemCatalogResponse;
+import com.example.demo.controller.dto.ItemMasterCatalogResponse;
 import com.example.demo.controller.dto.PageResponse;
 import com.example.demo.controller.dto.SwapButtonsRequest;
 import com.example.demo.controller.dto.SwapCategoriesRequest;
 import com.example.demo.controller.dto.UpdateCategoryGridRequest;
+import com.example.demo.controller.dto.UpdateItemMasterRequest;
 import com.example.demo.controller.dto.UpdateUnitPriceRequest;
 import com.example.demo.model.ItemCatalog;
+import com.example.demo.model.ItemMasterCatalog;
 import com.example.demo.model.PosConfig;
 import com.example.demo.model.PosDraft;
 import com.example.demo.service.AddButtonUseCase;
@@ -23,6 +26,7 @@ import com.example.demo.service.ExportPosUseCase;
 import com.example.demo.service.GetDraftHistoryUseCase;
 import com.example.demo.service.GetPageUseCase;
 import com.example.demo.service.GetItemCatalogUseCase;
+import com.example.demo.service.GetItemMasterCatalogUseCase;
 import com.example.demo.service.JumpDraftHistoryUseCase;
 import com.example.demo.service.RedoDraftUseCase;
 import com.example.demo.service.SwapButtonsUseCase;
@@ -30,6 +34,7 @@ import com.example.demo.service.SwapCategoriesUseCase;
 import com.example.demo.service.UndoDraftUseCase;
 import com.example.demo.service.UpdateUnitPriceUseCase;
 import com.example.demo.service.UpdateCategoryGridUseCase;
+import com.example.demo.service.UpdateItemMasterUseCase;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -48,6 +53,8 @@ public class PosDraftController {
     private final ClearDraftHistoryUseCase clearDraftHistoryUseCase;
     private final SwapButtonsUseCase swapButtonsUseCase;
     private final GetItemCatalogUseCase getItemCatalogUseCase;
+    private final GetItemMasterCatalogUseCase getItemMasterCatalogUseCase;
+    private final UpdateItemMasterUseCase updateItemMasterUseCase;
     private final AddButtonUseCase addButtonUseCase;
     private final DeleteButtonUseCase deleteButtonUseCase;
     private final UpdateUnitPriceUseCase updateUnitPriceUseCase;
@@ -66,6 +73,8 @@ public class PosDraftController {
             ClearDraftHistoryUseCase clearDraftHistoryUseCase,
             SwapButtonsUseCase swapButtonsUseCase,
             GetItemCatalogUseCase getItemCatalogUseCase,
+            GetItemMasterCatalogUseCase getItemMasterCatalogUseCase,
+            UpdateItemMasterUseCase updateItemMasterUseCase,
             AddButtonUseCase addButtonUseCase,
             DeleteButtonUseCase deleteButtonUseCase,
             UpdateUnitPriceUseCase updateUnitPriceUseCase,
@@ -83,6 +92,8 @@ public class PosDraftController {
         this.clearDraftHistoryUseCase = clearDraftHistoryUseCase;
         this.swapButtonsUseCase = swapButtonsUseCase;
         this.getItemCatalogUseCase = getItemCatalogUseCase;
+        this.getItemMasterCatalogUseCase = getItemMasterCatalogUseCase;
+        this.updateItemMasterUseCase = updateItemMasterUseCase;
         this.addButtonUseCase = addButtonUseCase;
         this.deleteButtonUseCase = deleteButtonUseCase;
         this.updateUnitPriceUseCase = updateUnitPriceUseCase;
@@ -147,7 +158,34 @@ public class PosDraftController {
     @GetMapping("/{draftId}/item-categories")
     public ItemCatalogResponse getItemCategories(@PathVariable String draftId) {
         ItemCatalog catalog = getItemCatalogUseCase.getItemCatalog(draftId);
-        return toItemCatalogResponse(catalog);
+        return ItemCatalogResponse.from(catalog);
+    }
+
+    @GetMapping("/{draftId}/item-master")
+    public ItemMasterCatalogResponse getItemMasterCatalog(@PathVariable String draftId) {
+        ItemMasterCatalog catalog = getItemMasterCatalogUseCase.getItemMasterCatalog(draftId);
+        return ItemMasterCatalogResponse.from(catalog);
+    }
+
+    @PatchMapping("/{draftId}/item-master/{currentItemCode}")
+    public ItemMasterCatalogResponse updateItemMaster(
+            @PathVariable String draftId,
+            @PathVariable String currentItemCode,
+            @RequestBody UpdateItemMasterRequest req
+    ) {
+        if (req == null) {
+            throw new IllegalArgumentException("request body is required");
+        }
+        ItemMasterCatalog updated = updateItemMasterUseCase.updateItem(
+                draftId,
+                currentItemCode,
+                req.itemCode,
+                req.itemNamePrint,
+                req.unitPrice,
+                req.costPrice,
+                req.basePrice
+        );
+        return ItemMasterCatalogResponse.from(updated);
     }
 
     @PostMapping("/{draftId}/pages/{pageNumber}/buttons")
@@ -331,24 +369,6 @@ public class PosDraftController {
             return d;
         }).collect(Collectors.toList());
         return res;
-    }
-
-    private static ItemCatalogResponse toItemCatalogResponse(ItemCatalog catalog) {
-        ItemCatalogResponse response = new ItemCatalogResponse();
-        response.categories = catalog.getCategories().stream().map(category -> {
-            ItemCatalogResponse.CategoryDto dto = new ItemCatalogResponse.CategoryDto();
-            dto.code = category.getCode();
-            dto.description = category.getDescription();
-            dto.items = category.getItems().stream().map(item -> {
-                ItemCatalogResponse.ItemDto itemDto = new ItemCatalogResponse.ItemDto();
-                itemDto.itemCode = item.getItemCode();
-                itemDto.itemName = item.getItemName();
-                itemDto.unitPrice = item.getUnitPrice();
-                return itemDto;
-            }).collect(Collectors.toList());
-            return dto;
-        }).collect(Collectors.toList());
-        return response;
     }
 
     private static CategoryStateResponse toCategoryStateResponse(PosDraft draft, int selectedPageNumber) {

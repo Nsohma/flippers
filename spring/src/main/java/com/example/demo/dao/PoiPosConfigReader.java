@@ -3,6 +3,7 @@ package com.example.demo.dao;
 import com.example.demo.dao.ExcelSupport.ExcelUtil;
 import com.example.demo.dao.ExcelSupport.HeaderMap;
 import com.example.demo.model.ItemCatalog;
+import com.example.demo.model.ItemMasterCatalog;
 import com.example.demo.model.PosConfig;
 import com.example.demo.model.PosConfigSource;
 import org.apache.poi.ss.usermodel.*;
@@ -79,6 +80,8 @@ public class PoiPosConfigReader implements PosConfigReader {
             Integer iName = itemHm.get("ItemName");
             Integer iNamePrint = itemHm.get("ItemNamePrint");
             int iUnitPrice = itemHm.require("UnitPrice");
+            Integer iCostPrice = itemHm.get("CostPrice");
+            Integer iBasePrice = itemHm.get("BasePrice");
 
             int hCode = mdHm.require("MDHierarchyCode");
             int hDesc = mdHm.require("Description");
@@ -88,6 +91,7 @@ public class PoiPosConfigReader implements PosConfigReader {
 
             Map<String, ItemInfo> itemInfoByItemCode = new LinkedHashMap<>();
             Map<String, String> unitPriceByItemCode = new HashMap<>();
+            List<ItemMasterCatalog.Item> itemMasterItems = new ArrayList<>();
             for (int r = itemHm.dataStartRow; r <= item.getLastRowNum(); r++) {
                 Row row = item.getRow(r);
                 if (row == null) continue;
@@ -102,10 +106,21 @@ public class PoiPosConfigReader implements PosConfigReader {
                 if (isBlank(itemName) && iNamePrint != null) {
                     itemName = nonNull(u.str(row.getCell(iNamePrint)));
                 }
+                String itemNamePrint = iNamePrint == null ? "" : nonNull(u.str(row.getCell(iNamePrint)));
+                if (isBlank(itemNamePrint)) {
+                    itemNamePrint = itemName;
+                }
+                itemNamePrint = normalizeItemName(itemNamePrint, itemCode);
                 String unitPrice = nonNull(u.str(row.getCell(iUnitPrice)));
+                String costPrice = iCostPrice == null ? "" : nonNull(u.str(row.getCell(iCostPrice)));
+                String basePrice = iBasePrice == null ? "" : nonNull(u.str(row.getCell(iBasePrice)));
                 itemInfoByItemCode.put(itemCode, new ItemInfo(itemName, unitPrice));
                 unitPriceByItemCode.put(itemCode, unitPrice);
+                itemMasterItems.add(
+                        new ItemMasterCatalog.Item(itemCode, itemNamePrint, unitPrice, costPrice, basePrice)
+                );
             }
+            ItemMasterCatalog itemMasterCatalog = new ItemMasterCatalog(itemMasterItems);
 
             Map<String, String> categoryDescriptionByCode = new LinkedHashMap<>();
             for (int r = mdHm.dataStartRow; r <= mdHierarchy.getLastRowNum(); r++) {
@@ -289,7 +304,7 @@ public class PoiPosConfigReader implements PosConfigReader {
                 );
             }
 
-            return new PosConfigSource(categories, pageButtons, itemCatalog, handyCatalog);
+            return new PosConfigSource(categories, pageButtons, itemCatalog, handyCatalog, itemMasterCatalog);
         }
     }
 

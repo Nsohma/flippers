@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, inject, onBeforeUnmount, ref } from "vue";
 import { usePosDraft } from "../composables/usePosDraft";
 import { useDragDrop } from "../composables/useDragDrop";
 import CategoryTabs from "../components/pos/CategoryTabs.vue";
@@ -13,7 +13,7 @@ import ModeSwitch from "../components/ModeSwitch.vue";
 
 const envApiBase = (import.meta.env.VITE_API_BASE ?? "").trim();
 const API_BASE = (envApiBase || "/api/pos").replace(/\/+$/, "");
-const fileRef = ref(null);
+const toggleSidebar = inject("toggleSidebar", null);
 
 const {
   state,
@@ -25,9 +25,7 @@ const {
   buttonMap,
   gridCells,
   filteredAddItems,
-  importExcel,
   loadPage,
-  exportExcel,
   buttonClass,
   formatPrice,
   closeAddDialog,
@@ -109,14 +107,6 @@ async function submitAddCategoryWithHighlight() {
   const success = await submitAddCategory();
   if (!success) return;
   markRecentEditedCategories([state.selectedPageNumber]);
-}
-
-function clearPendingCategoryDelete() {
-  if (pendingDeleteCategoryTimerId != null) {
-    window.clearTimeout(pendingDeleteCategoryTimerId);
-    pendingDeleteCategoryTimerId = null;
-  }
-  pendingDeleteCategoryPage.value = null;
 }
 
 function queueCategoryDelete(pageNumber) {
@@ -203,24 +193,21 @@ const {
   onSwap: ({ fromCol, fromRow, toCol, toRow }) => swapButtonsWithHighlight(fromCol, fromRow, toCol, toRow),
 });
 
-async function onImportClick() {
-  const file = fileRef.value?.files?.[0];
-  clearPendingCategoryDelete();
-  await importExcel(file);
+function onToggleSidebar() {
+  if (typeof toggleSidebar === "function") {
+    toggleSidebar();
+  }
 }
 </script>
 
 <template>
   <div class="wrap">
-    <h1>Flippers POS Key Editor (MVP)</h1>
+    <div class="title-row">
+      <button type="button" class="menu-toggle" aria-label="サイドバーを開閉" @click="onToggleSidebar">☰</button>
+      <h1>Flippers POS Editor</h1>
+    </div>
 
-    <section class="panel">
-      <input ref="fileRef" type="file" accept=".xlsx" />
-      <button :disabled="state.loading" @click="onImportClick">Import</button>
-      <button :disabled="state.loading || !state.draftId" @click="exportExcel">Export</button>
-      <button :disabled="state.loading || !state.draftId || !state.canUndo" @click="undo">Undo</button>
-      <button :disabled="state.loading || !state.draftId || !state.canRedo" @click="redo">Redo</button>
-
+    <section v-if="state.draftId || state.error" class="panel">
       <div v-if="state.draftId" class="meta">
         <div><b>draftId</b>: {{ state.draftId }}</div>
       </div>
@@ -228,15 +215,24 @@ async function onImportClick() {
       <div v-if="state.error" class="error">{{ state.error }}</div>
     </section>
 
-    <ModeSwitch />
+    <div class="mode-row">
+      <ModeSwitch />
+    </div>
+    <p v-if="!state.draftId" class="hint">
+      トップ画面でExcelをImportすると、CategoryMaster / ItemCategoryMaster から画面を表示します。
+    </p>
 
     <EditHistoryPanel
       v-if="state.draftId"
       :entries="state.historyEntries"
       :current-index="state.historyIndex"
       :loading="state.loading"
+      :can-undo="state.canUndo"
+      :can-redo="state.canRedo"
       @jump="jumpToHistory"
       @clear="clearHistory"
+      @undo="undo"
+      @redo="redo"
     />
 
     <CategoryTabs
@@ -335,12 +331,53 @@ async function onImportClick() {
   padding: 0 16px;
   font-family: system-ui, -apple-system, sans-serif;
 }
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+h1 {
+  margin: 0;
+}
+
+.menu-toggle {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid #c7d1e4;
+  background: #fff;
+  color: #344862;
+  font-size: 18px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.menu-toggle:hover {
+  background: #f5f8ff;
+}
+
 .panel {
   background: #fff;
   border: 1px solid #eee;
   border-radius: 12px;
   padding: 12px;
   margin: 12px 0;
+}
+.mode-row {
+  margin: 8px 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+}
+.mode-row :deep(.mode-switch) {
+  margin: 0;
 }
 .error {
   color: #b00020;
@@ -349,6 +386,11 @@ async function onImportClick() {
 }
 .meta {
   margin-top: 8px;
+  font-size: 13px;
+}
+.hint {
+  margin-top: 10px;
+  color: #445;
   font-size: 13px;
 }
 </style>

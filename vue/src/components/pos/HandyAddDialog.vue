@@ -63,7 +63,7 @@ function onSearchInput(event) {
         @change="onCategoryChange"
       >
         <option v-for="category in categories" :key="category.code" :value="category.code">
-          {{ category.description }} ({{ category.code }})
+          {{ category.description }} ({{ Array.isArray(category.items) ? category.items.length : 0 }})
         </option>
       </select>
 

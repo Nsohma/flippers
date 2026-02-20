@@ -8,9 +8,10 @@ public class PosConfigSource {
     private final List<PageButton> pageButtons;
     private final ItemCatalog itemCatalog;
     private final ItemCatalog handyCatalog;
+    private final ItemMasterCatalog itemMasterCatalog;
 
     public PosConfigSource(List<PosConfig.Category> categories, List<PageButton> pageButtons) {
-        this(categories, pageButtons, ItemCatalog.empty(), ItemCatalog.empty());
+        this(categories, pageButtons, ItemCatalog.empty(), ItemCatalog.empty(), ItemMasterCatalog.empty());
     }
 
     public PosConfigSource(
@@ -18,7 +19,7 @@ public class PosConfigSource {
             List<PageButton> pageButtons,
             ItemCatalog itemCatalog
     ) {
-        this(categories, pageButtons, itemCatalog, ItemCatalog.empty());
+        this(categories, pageButtons, itemCatalog, ItemCatalog.empty(), ItemMasterCatalog.empty());
     }
 
     public PosConfigSource(
@@ -27,10 +28,21 @@ public class PosConfigSource {
             ItemCatalog itemCatalog,
             ItemCatalog handyCatalog
     ) {
+        this(categories, pageButtons, itemCatalog, handyCatalog, ItemMasterCatalog.empty());
+    }
+
+    public PosConfigSource(
+            List<PosConfig.Category> categories,
+            List<PageButton> pageButtons,
+            ItemCatalog itemCatalog,
+            ItemCatalog handyCatalog,
+            ItemMasterCatalog itemMasterCatalog
+    ) {
         this.categories = List.copyOf(Objects.requireNonNull(categories));
         this.pageButtons = List.copyOf(Objects.requireNonNull(pageButtons));
         this.itemCatalog = Objects.requireNonNull(itemCatalog);
         this.handyCatalog = Objects.requireNonNull(handyCatalog);
+        this.itemMasterCatalog = Objects.requireNonNull(itemMasterCatalog);
     }
 
     public List<PosConfig.Category> getCategories() {
@@ -47,6 +59,10 @@ public class PosConfigSource {
 
     public ItemCatalog getHandyCatalog() {
         return handyCatalog;
+    }
+
+    public ItemMasterCatalog getItemMasterCatalog() {
+        return itemMasterCatalog;
     }
 
     public static class PageButton {

@@ -150,6 +150,8 @@ function onInput(eventName, event) {
   border-radius: 8px;
   padding: 8px 10px;
   font-size: 14px;
+  width: 100%;
+  box-sizing: border-box;
 }
 .category-grid-form {
   display: grid;
@@ -159,6 +161,7 @@ function onInput(eventName, event) {
 .category-grid-form .field-label {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 .actions {
   display: flex;

@@ -24,8 +24,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.stream.Collectors;
-
 @RestController
 @RequestMapping("/api/pos/drafts/{draftId}/handy-categories")
 public class HandyDraftController {
@@ -62,7 +60,7 @@ public class HandyDraftController {
     @GetMapping
     public ItemCatalogResponse getHandyCategories(@PathVariable String draftId) {
         ItemCatalog catalog = getHandyCatalogUseCase.getHandyCatalog(draftId);
-        return toItemCatalogResponse(catalog);
+        return ItemCatalogResponse.from(catalog);
     }
 
     @PostMapping
@@ -77,7 +75,7 @@ public class HandyDraftController {
                 draftId,
                 req.description
         );
-        return toItemCatalogResponse(updatedCatalog);
+        return ItemCatalogResponse.from(updatedCatalog);
     }
 
     @DeleteMapping("/{categoryCode}")
@@ -89,7 +87,7 @@ public class HandyDraftController {
                 draftId,
                 categoryCode
         );
-        return toItemCatalogResponse(updatedCatalog);
+        return ItemCatalogResponse.from(updatedCatalog);
     }
 
     @PatchMapping("/swap")
@@ -105,7 +103,7 @@ public class HandyDraftController {
                 req.fromCategoryCode,
                 req.toCategoryCode
         );
-        return toItemCatalogResponse(updatedCatalog);
+        return ItemCatalogResponse.from(updatedCatalog);
     }
 
     @PatchMapping("/reorder")
@@ -124,7 +122,7 @@ public class HandyDraftController {
                 req.fromIndex,
                 req.toIndex
         );
-        return toItemCatalogResponse(updatedCatalog);
+        return ItemCatalogResponse.from(updatedCatalog);
     }
 
     @PatchMapping("/{categoryCode}/items/reorder")
@@ -145,7 +143,7 @@ public class HandyDraftController {
                 req.fromIndex,
                 req.toIndex
         );
-        return toItemCatalogResponse(updatedCatalog);
+        return ItemCatalogResponse.from(updatedCatalog);
     }
 
     @DeleteMapping("/{categoryCode}/items/{itemIndex}")
@@ -159,7 +157,7 @@ public class HandyDraftController {
                 categoryCode,
                 itemIndex
         );
-        return toItemCatalogResponse(updatedCatalog);
+        return ItemCatalogResponse.from(updatedCatalog);
     }
 
     @PostMapping("/{categoryCode}/items")
@@ -177,24 +175,6 @@ public class HandyDraftController {
                 req.sourceCategoryCode,
                 req.itemCode
         );
-        return toItemCatalogResponse(updatedCatalog);
-    }
-
-    private static ItemCatalogResponse toItemCatalogResponse(ItemCatalog catalog) {
-        ItemCatalogResponse response = new ItemCatalogResponse();
-        response.categories = catalog.getCategories().stream().map(category -> {
-            ItemCatalogResponse.CategoryDto dto = new ItemCatalogResponse.CategoryDto();
-            dto.code = category.getCode();
-            dto.description = category.getDescription();
-            dto.items = category.getItems().stream().map(item -> {
-                ItemCatalogResponse.ItemDto itemDto = new ItemCatalogResponse.ItemDto();
-                itemDto.itemCode = item.getItemCode();
-                itemDto.itemName = item.getItemName();
-                itemDto.unitPrice = item.getUnitPrice();
-                return itemDto;
-            }).collect(Collectors.toList());
-            return dto;
-        }).collect(Collectors.toList());
-        return response;
+        return ItemCatalogResponse.from(updatedCatalog);
     }
 }

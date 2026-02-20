@@ -3,6 +3,7 @@ package com.example.demo.dao;
 import com.example.demo.dao.ExcelSupport.ExcelUtil;
 import com.example.demo.dao.ExcelSupport.HeaderMap;
 import com.example.demo.model.ItemCatalog;
+import com.example.demo.model.ItemMasterCatalog;
 import com.example.demo.model.PosConfig;
 import com.example.demo.service.port.PosConfigExporter;
 import org.apache.poi.ss.usermodel.Cell;
@@ -33,11 +34,21 @@ public class PoiPosConfigExporter implements PosConfigExporter {
 
     @Override
     public byte[] export(byte[] originalExcelBytes, PosConfig config) throws Exception {
-        return export(originalExcelBytes, config, null);
+        return export(originalExcelBytes, config, null, null);
     }
 
     @Override
     public byte[] export(byte[] originalExcelBytes, PosConfig config, ItemCatalog handyCatalog) throws Exception {
+        return export(originalExcelBytes, config, handyCatalog, null);
+    }
+
+    @Override
+    public byte[] export(
+            byte[] originalExcelBytes,
+            PosConfig config,
+            ItemCatalog handyCatalog,
+            ItemMasterCatalog itemMasterCatalog
+    ) throws Exception {
         try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(originalExcelBytes))) {
             Sheet btn = requireSheet(wb, SHEET_BUTTON);
             Sheet menu = requireSheet(wb, SHEET_MENU);
@@ -60,6 +71,9 @@ public class PoiPosConfigExporter implements PosConfigExporter {
             int mStyle = menuHm.require("StyleKey");
             int iCode = itemHm.require("ItemCode");
             int iUnitPrice = itemHm.require("UnitPrice");
+            Integer iNamePrint = itemHm.get("ItemNamePrint");
+            Integer iCostPrice = itemHm.get("CostPrice");
+            Integer iBasePrice = itemHm.get("BasePrice");
 
             List<IndexedButton> sortedButtons = collectAndSortButtons(config);
             List<PosConfig.Category> sortedCategories = collectAndSortCategories(config);
@@ -94,6 +108,8 @@ public class PoiPosConfigExporter implements PosConfigExporter {
                 writeButtonRow(row, bPage, bCol, bRow, bDesc, bStyle, bSet, indexedButton);
                 writeRowIndex++;
             }
+
+            applyItemMasterCatalog(item, itemHm, u, itemMasterCatalog, iCode, iNamePrint, iUnitPrice, iCostPrice, iBasePrice);
 
             Map<String, String> unitPriceByItemCode = collectUnitPriceByItemCode(config);
             for (int r = itemHm.dataStartRow; r <= item.getLastRowNum(); r++) {
@@ -159,6 +175,55 @@ public class PoiPosConfigExporter implements PosConfigExporter {
         List<PosConfig.Category> list = new ArrayList<>(config.getCategories());
         list.sort(Comparator.comparingInt(PosConfig.Category::getPageNumber));
         return list;
+    }
+
+    private static void applyItemMasterCatalog(
+            Sheet itemSheet,
+            HeaderMap itemHm,
+            ExcelUtil util,
+            ItemMasterCatalog itemMasterCatalog,
+            int iCode,
+            Integer iNamePrint,
+            int iUnitPrice,
+            Integer iCostPrice,
+            Integer iBasePrice
+    ) {
+        if (itemMasterCatalog == null) {
+            return;
+        }
+        List<ItemMasterCatalog.Item> items = itemMasterCatalog.getItems();
+        if (items.isEmpty()) {
+            return;
+        }
+
+        int itemIndex = 0;
+        for (int r = itemHm.dataStartRow; r <= itemSheet.getLastRowNum(); r++) {
+            if (itemIndex >= items.size()) {
+                break;
+            }
+            Row row = itemSheet.getRow(r);
+            if (row == null) {
+                continue;
+            }
+            String currentItemCode = util.str(row.getCell(iCode));
+            if (currentItemCode == null || currentItemCode.isBlank()) {
+                continue;
+            }
+
+            ItemMasterCatalog.Item edited = items.get(itemIndex);
+            setString(row, iCode, edited.getItemCode());
+            if (iNamePrint != null) {
+                setString(row, iNamePrint, edited.getItemNamePrint());
+            }
+            setNumericOrString(row, iUnitPrice, edited.getUnitPrice());
+            if (iCostPrice != null) {
+                setNumericOrString(row, iCostPrice, edited.getCostPrice());
+            }
+            if (iBasePrice != null) {
+                setNumericOrString(row, iBasePrice, edited.getBasePrice());
+            }
+            itemIndex += 1;
+        }
     }
 
     private static void applyHandyCategoryDisplayLevels(Workbook wb, ExcelUtil u, ItemCatalog handyCatalog) {

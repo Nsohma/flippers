@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { usePosDraft } from "../composables/usePosDraft";
 import HandyCatalogPanel from "../components/pos/HandyCatalogPanel.vue";
 import HandyAddDialog from "../components/pos/HandyAddDialog.vue";
@@ -10,7 +10,7 @@ import ModeSwitch from "../components/ModeSwitch.vue";
 const envApiBase = (import.meta.env.VITE_API_BASE ?? "").trim();
 const API_BASE = (envApiBase || "/api/pos").replace(/\/+$/, "");
 const DELETE_PENDING_MS = 500;
-const fileRef = ref(null);
+const toggleSidebar = inject("toggleSidebar", null);
 const recentEditedCategoryCodes = ref([]);
 const recentEditedItemKeys = ref([]);
 const pendingDeleteCategoryCode = ref("");
@@ -29,8 +29,6 @@ const {
   selectedHandyCategory,
   handyItems,
   filteredHandyAddItems,
-  importExcel,
-  exportExcel,
   formatPrice,
   undo,
   redo,
@@ -49,13 +47,6 @@ const {
   submitAddHandyCategory,
   deleteHandyCategory,
 } = usePosDraft(API_BASE);
-
-async function onImportClick() {
-  clearPendingCategoryDelete();
-  clearPendingItemDelete();
-  const file = fileRef.value?.files?.[0];
-  await importExcel(file);
-}
 
 function markRecentHandyCategories(codes) {
   const normalized = Array.from(new Set(codes.filter((code) => typeof code === "string" && code.trim().length > 0)));
@@ -198,22 +189,6 @@ async function submitAddHandyCategoryWithHighlight() {
   markRecentHandyCategories([handyCatalogState.selectedCategoryCode]);
 }
 
-function clearPendingCategoryDelete() {
-  if (pendingDeleteCategoryTimerId != null) {
-    window.clearTimeout(pendingDeleteCategoryTimerId);
-    pendingDeleteCategoryTimerId = null;
-  }
-  pendingDeleteCategoryCode.value = "";
-}
-
-function clearPendingItemDelete() {
-  if (pendingDeleteItemTimerId != null) {
-    window.clearTimeout(pendingDeleteItemTimerId);
-    pendingDeleteItemTimerId = null;
-  }
-  pendingDeleteItemKey.value = "";
-}
-
 function queueHandyCategoryDelete(categoryCode) {
   const code = String(categoryCode ?? "").trim();
   if (!code) return;
@@ -268,6 +243,12 @@ async function onDeleteCategory(categoryCode) {
   queueHandyCategoryDelete(code);
 }
 
+function onToggleSidebar() {
+  if (typeof toggleSidebar === "function") {
+    toggleSidebar();
+  }
+}
+
 onBeforeUnmount(() => {
   if (recentEditedCategoryTimerId != null) {
     window.clearTimeout(recentEditedCategoryTimerId);
@@ -290,33 +271,37 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="wrap">
-    <h1>Flippers Handy Viewer (MVP)</h1>
+    <div class="title-row">
+      <button type="button" class="menu-toggle" aria-label="サイドバーを開閉" @click="onToggleSidebar">☰</button>
+      <h1>Flippers POS Editor</h1>
+    </div>
 
-    <section class="panel">
-      <input ref="fileRef" type="file" accept=".xlsx" />
-      <button :disabled="state.loading" @click="onImportClick">Import</button>
-      <button :disabled="state.loading || !state.draftId" @click="exportExcel">Export</button>
-      <button :disabled="state.loading || !state.draftId || !state.canUndo" @click="undo">Undo</button>
-      <button :disabled="state.loading || !state.draftId || !state.canRedo" @click="redo">Redo</button>
+    <section v-if="state.draftId || state.error" class="panel">
       <div v-if="state.draftId" class="meta">
         <div><b>draftId</b>: {{ state.draftId }}</div>
       </div>
       <div v-if="state.error" class="error">{{ state.error }}</div>
     </section>
 
-    <ModeSwitch />
+    <div class="mode-row">
+      <ModeSwitch />
+    </div>
 
     <EditHistoryPanel
       v-if="state.draftId"
       :entries="state.historyEntries"
       :current-index="state.historyIndex"
       :loading="state.loading"
+      :can-undo="state.canUndo"
+      :can-redo="state.canRedo"
       @jump="jumpToHistory"
       @clear="clearHistory"
+      @undo="undo"
+      @redo="redo"
     />
 
     <p v-if="!state.draftId" class="hint">
-      ExcelをImportすると、CategoryMaster / ItemCategoryMaster からハンディカテゴリを表示します。
+      トップ画面でExcelをImportすると、CategoryMaster / ItemCategoryMaster から画面を表示します。
     </p>
 
     <HandyCatalogPanel
@@ -377,12 +362,53 @@ onBeforeUnmount(() => {
   padding: 0 16px;
   font-family: system-ui, -apple-system, sans-serif;
 }
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+h1 {
+  margin: 0;
+}
+
+.menu-toggle {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid #c7d1e4;
+  background: #fff;
+  color: #344862;
+  font-size: 18px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.menu-toggle:hover {
+  background: #f5f8ff;
+}
+
 .panel {
   background: #fff;
   border: 1px solid #eee;
   border-radius: 12px;
   padding: 12px;
   margin: 12px 0;
+}
+.mode-row {
+  margin: 8px 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+}
+.mode-row :deep(.mode-switch) {
+  margin: 0;
 }
 .error {
   color: #b00020;

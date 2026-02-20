@@ -4,7 +4,7 @@ import { RouterLink } from "vue-router";
 
 <template>
   <section class="mode-switch">
-    <RouterLink class="mode-link" to="/">レジキー</RouterLink>
+    <RouterLink class="mode-link" to="/pos">レジキー</RouterLink>
     <RouterLink class="mode-link" to="/handy">ハンディ</RouterLink>
   </section>
 </template>
